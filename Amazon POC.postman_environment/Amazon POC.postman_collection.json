@@ -1,0 +1,1163 @@
+{
+  "info": {
+    "_postman_id": "0958176e-e7c0-4838-9f08-4ae0c215a744",
+    "name": "Amazon POC",
+    "description": "Proof of concept for the Adams Flavor Amazon FBA integration with SyteLine.\n\nSETUP\n1. Import this collection and the environment file. Select the environment.\n2. Fill in clientId, clientSecret and refreshToken (see the developer spec, Phase 1: Developer Central, View LWA credentials, then Authorize the app). Keep them in the environment only.\n3. For the Payments folder, the Amazon app must have the Finance and Accounting role, and Adams must re-authorize it after the role is added.\n4. Run the requests in order. The collection refreshes the access token automatically and passes IDs between requests (orderId, reportId, reportDocumentId, financialEventGroupId). Results are written to the Postman Console.\n\nFOLDERS\n1. Authentication\n2. Customer Orders connector (Orders API v2026-01-01)\n3. RMA connector (Reports API, FBA customer returns)\n4. Payments (Finances API and settlement report). Not in the current SOW. Shows that payouts can be tied to the bank deposit.\n\nRun requests one at a time. Do not use the collection runner on the orders search, which allows about one call every three minutes.\nAmazon sandbox data is static sample data. To use it, set baseUrl to https://sandbox.sellingpartnerapi-na.amazon.com. Real credentials are needed to see Adams data.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "14435497"
+  },
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "1.1 Get LWA access token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Token request succeeded\", () => pm.response.to.have.status(200));\nconst j = pm.response.json();\npm.collectionVariables.set(\"accessToken\", j.access_token);\npm.collectionVariables.set(\"tokenExpiry\", String(Date.now() + (j.expires_in - 120) * 1000));\nconsole.log(\"Access token stored. Expires in\", j.expires_in, \"seconds\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "refresh_token"
+                },
+                {
+                  "key": "refresh_token",
+                  "value": "{{refreshToken}}"
+                },
+                {
+                  "key": "client_id",
+                  "value": "{{clientId}}"
+                },
+                {
+                  "key": "client_secret",
+                  "value": "{{clientSecret}}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "https://api.amazon.com/auth/o2/token",
+              "protocol": "https",
+              "host": [
+                "api",
+                "amazon",
+                "com"
+              ],
+              "path": [
+                "auth",
+                "o2",
+                "token"
+              ]
+            },
+            "description": "Exchanges the refresh token for a one hour access token. The collection pre-request script calls this automatically when the token is missing or about to expire, so running it by hand is optional."
+          },
+          "response": []
+        }
+      ],
+      "description": "Login with Amazon token. Optional, the collection does this automatically."
+    },
+    {
+      "name": "2. Customer Orders connector",
+      "item": [
+        {
+          "name": "2.1 Search FBA orders (lastUpdatedAfter)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"lastUpdatedAfter\")) pm.collectionVariables.set(\"lastUpdatedAfter\", new Date(Date.now() - 2*24*3600*1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const orders = j.orders || [];",
+                  "const counts = {};",
+                  "orders.forEach(o => { const s = o.fulfillment && o.fulfillment.fulfillmentStatus; counts[s] = (counts[s] || 0) + 1; });",
+                  "console.log(\"Orders returned:\", orders.length, \"by status:\", JSON.stringify(counts));",
+                  "const ready = orders.filter(o => [\"SHIPPED\", \"PARTIALLY_SHIPPED\"].includes(o.fulfillment && o.fulfillment.fulfillmentStatus));",
+                  "console.log(\"Orders ready to create in SyteLine:\", ready.length);",
+                  "if (orders.length) pm.collectionVariables.set(\"orderId\", (ready[0] || orders[0]).orderId);",
+                  "pm.collectionVariables.set(\"paginationToken\", j.pagination && j.pagination.nextToken ? j.pagination.nextToken : \"\");",
+                  "pm.test(\"FBA only\", () => orders.every(o => !o.fulfillment || o.fulfillment.fulfilledBy === \"AMAZON\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/2026-01-01/orders?marketplaceIds={{marketplaceId}}&fulfilledBy=AMAZON&lastUpdatedAfter={{lastUpdatedAfter}}&includedData=FULFILLMENT,PACKAGES,PROCEEDS&maxResultsPerPage=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "2026-01-01",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "marketplaceIds",
+                  "value": "{{marketplaceId}}"
+                },
+                {
+                  "key": "fulfilledBy",
+                  "value": "AMAZON"
+                },
+                {
+                  "key": "lastUpdatedAfter",
+                  "value": "{{lastUpdatedAfter}}"
+                },
+                {
+                  "key": "includedData",
+                  "value": "FULFILLMENT,PACKAGES,PROCEEDS"
+                },
+                {
+                  "key": "maxResultsPerPage",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Orders connector, step 1. Orders API v2026-01-01 searchOrders. FBA orders only (fulfilledBy=AMAZON). Provide exactly one of createdAfter or lastUpdatedAfter. Rate limit is about one call every three minutes (0.0056 per second, burst 20), so do not run this in a tight loop. The connector creates SyteLine orders only when fulfillment.fulfillmentStatus is SHIPPED or PARTIALLY_SHIPPED. The lastUpdatedAfter variable defaults to two days ago; change it in the collection variables to look further back."
+          },
+          "response": []
+        },
+        {
+          "name": "2.2 Search FBA orders (next page)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"lastUpdatedAfter\")) pm.collectionVariables.set(\"lastUpdatedAfter\", new Date(Date.now() - 2*24*3600*1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "console.log(\"Orders on this page:\", (j.orders || []).length);",
+                  "pm.collectionVariables.set(\"paginationToken\", j.pagination && j.pagination.nextToken ? j.pagination.nextToken : \"\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/2026-01-01/orders?paginationToken={{paginationToken}}&marketplaceIds={{marketplaceId}}&fulfilledBy=AMAZON&lastUpdatedAfter={{lastUpdatedAfter}}&includedData=FULFILLMENT,PACKAGES,PROCEEDS&maxResultsPerPage=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "2026-01-01",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "paginationToken",
+                  "value": "{{paginationToken}}"
+                },
+                {
+                  "key": "marketplaceIds",
+                  "value": "{{marketplaceId}}"
+                },
+                {
+                  "key": "fulfilledBy",
+                  "value": "AMAZON"
+                },
+                {
+                  "key": "lastUpdatedAfter",
+                  "value": "{{lastUpdatedAfter}}"
+                },
+                {
+                  "key": "includedData",
+                  "value": "FULFILLMENT,PACKAGES,PROCEEDS"
+                },
+                {
+                  "key": "maxResultsPerPage",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Only needed when 2.1 returned a pagination token (saved automatically). Tokens expire after 24 hours. Repeat the same filters as the first call. If the token appears in a different field in the 2.1 response, update the test script of 2.1 and 2.2."
+          },
+          "response": []
+        },
+        {
+          "name": "2.3 Get one order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const o = pm.response.json().order || pm.response.json();",
+                  "console.log(\"Order\", o.orderId, \"status\", o.fulfillment && o.fulfillment.fulfillmentStatus);",
+                  "(o.orderItems || o.items || []).forEach(i => console.log(\"  item\", i.product && i.product.sellerSku, \"qty fulfilled\", i.fulfillment && i.fulfillment.quantityFulfilled));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orders/2026-01-01/orders/{{orderId}}?includedData=FULFILLMENT,PACKAGES,PROCEEDS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "orders",
+                "2026-01-01",
+                "orders",
+                "{{orderId}}"
+              ],
+              "query": [
+                {
+                  "key": "includedData",
+                  "value": "FULFILLMENT,PACKAGES,PROCEEDS"
+                }
+              ]
+            },
+            "description": "Single order with its items. Use to inspect the field mapping: orderId (customer PO), createdTime, items product.sellerSku, quantityOrdered, fulfillment.quantityFulfilled, product.price.unitPrice and proceeds.breakdowns. Rate limit 0.5 per second, burst 30. The orderId is saved by 2.1."
+          },
+          "response": []
+        },
+        {
+          "name": "SANDBOX - 2.4 Search FBA orders (EU Sandbox)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"lastUpdatedAfter\")) pm.collectionVariables.set(\"lastUpdatedAfter\", new Date(Date.now() - 2*24*3600*1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));\nconst j = pm.response.json();\nconst orders = j.orders || [];\nconst counts = {};\norders.forEach(o => { const s = o.fulfillment && o.fulfillment.fulfillmentStatus; counts[s] = (counts[s] || 0) + 1; });\nconsole.log(\"Orders returned:\", orders.length, \"by status:\", JSON.stringify(counts));\nconst ready = orders.filter(o => [\"SHIPPED\", \"PARTIALLY_SHIPPED\"].includes(o.fulfillment && o.fulfillment.fulfillmentStatus));\nconsole.log(\"Orders ready to create in SyteLine:\", ready.length);\nif (orders.length) pm.collectionVariables.set(\"orderId\", (ready[0] || orders[0]).orderId);\npm.collectionVariables.set(\"paginationToken\", j.pagination && j.pagination.nextToken ? j.pagination.nextToken : \"\");\npm.test(\"FBA only\", () => orders.every(o => !o.fulfillment || o.fulfillment.fulfilledBy === \"AMAZON\"));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://sandbox.sellingpartnerapi-eu.amazon.com/orders/2026-01-01/orders?createdAfter=2024-12-23T00:00:00Z&marketplaceIds=A1F83G8C2ARO7P&includedData=BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES&paginationToken=9ZhB4RmVyc2lvbiAxLjAgb2YgdGhl",
+              "protocol": "https",
+              "host": [
+                "sandbox",
+                "sellingpartnerapi-eu",
+                "amazon",
+                "com"
+              ],
+              "path": [
+                "orders",
+                "2026-01-01",
+                "orders"
+              ],
+              "query": [
+                {
+                  "key": "createdAfter",
+                  "value": "2024-12-23T00:00:00Z"
+                },
+                {
+                  "key": "marketplaceIds",
+                  "value": "A1F83G8C2ARO7P"
+                },
+                {
+                  "key": "includedData",
+                  "value": "BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES"
+                },
+                {
+                  "key": "paginationToken",
+                  "value": "9ZhB4RmVyc2lvbiAxLjAgb2YgdGhl"
+                }
+              ]
+            },
+            "description": "Orders connector, step 1. Orders API v2026-01-01 searchOrders. FBA orders only (fulfilledBy=AMAZON). Provide exactly one of createdAfter or lastUpdatedAfter. Rate limit is about one call every three minutes (0.0056 per second, burst 20), so do not run this in a tight loop. The connector creates SyteLine orders only when fulfillment.fulfillmentStatus is SHIPPED or PARTIALLY_SHIPPED. The lastUpdatedAfter variable defaults to two days ago; change it in the collection variables to look further back."
+          },
+          "response": [
+            {
+              "name": "FBA Order Sample (GPT 3 order mock)",
+              "originalRequest": {
+                "method": "GET",
+                "header": [],
+                "url": {
+                  "raw": "https://sandbox.sellingpartnerapi-fe.amazon.com/orders/2026-01-01/orders?createdAfter=2024-12-25T00:00:00Z&marketplaceIds=A1VC38T7YXB528&includedData=BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES&paginationToken=2YgYW55IGNhcm5hbCBwbGVhc3VyZS4",
+                  "protocol": "https",
+                  "host": [
+                    "sandbox",
+                    "sellingpartnerapi-fe",
+                    "amazon",
+                    "com"
+                  ],
+                  "path": [
+                    "orders",
+                    "2026-01-01",
+                    "orders"
+                  ],
+                  "query": [
+                    {
+                      "key": "createdAfter",
+                      "value": "2024-12-25T00:00:00Z"
+                    },
+                    {
+                      "key": "marketplaceIds",
+                      "value": "A1VC38T7YXB528"
+                    },
+                    {
+                      "key": "includedData",
+                      "value": "BUYER,RECIPIENT,PROCEEDS,EXPENSE,PROMOTION,CANCELLATION,FULFILLMENT,PACKAGES"
+                    },
+                    {
+                      "key": "paginationToken",
+                      "value": "2YgYW55IGNhcm5hbCBwbGVhc3VyZS4"
+                    }
+                  ]
+                }
+              },
+              "status": "OK",
+              "code": 200,
+              "_postman_previewlanguage": "json",
+              "header": [
+                {
+                  "key": ":status",
+                  "value": "200"
+                },
+                {
+                  "key": "content-type",
+                  "value": "application/json"
+                },
+                {
+                  "key": "server",
+                  "value": "Server"
+                },
+                {
+                  "key": "date",
+                  "value": "Fri, 23 Oct 2026 21:59:19 GMT"
+                },
+                {
+                  "key": "strict-transport-security",
+                  "value": "max-age=47474747; includeSubDomains; preload"
+                },
+                {
+                  "key": "edge-cache-control",
+                  "value": "no-store,no-cache,stale-if-error=0,stale-while-revalidate=0"
+                },
+                {
+                  "key": "x-amzn-ratelimit-limit",
+                  "value": "5.0"
+                },
+                {
+                  "key": "x-amzn-requestid",
+                  "value": "e629445c-f85a-447d-ae7f-f1a1ec05fd58"
+                },
+                {
+                  "key": "x-amz-apigw-id",
+                  "value": "OPFe629445cf85a"
+                },
+                {
+                  "key": "x-amzn-trace-id",
+                  "value": "Root=1-6adbd8b7-e629445cf85a447d"
+                },
+                {
+                  "key": "vary",
+                  "value": "accept-encoding,User-Agent"
+                },
+                {
+                  "key": "content-encoding",
+                  "value": "gzip"
+                },
+                {
+                  "key": "x-amz-rid",
+                  "value": "P5W55K6TR91GBRW8Q125"
+                },
+                {
+                  "key": "x-cache",
+                  "value": "Miss from cloudfront"
+                },
+                {
+                  "key": "via",
+                  "value": "1.1 f66eb68df712b0b0242ab5c637f76f40.cloudfront.net (CloudFront)"
+                },
+                {
+                  "key": "x-amz-cf-pop",
+                  "value": "PHL51-P4"
+                },
+                {
+                  "key": "x-amz-cf-id",
+                  "value": "DYau9AudqwyZokLT1_WK-C93fxI5c4ahMDCYEKrDkQIjoROOsRuyzQ=="
+                }
+              ],
+              "cookie": [],
+              "body": "{\n  \"orders\": [\n    {\n      \"orderId\": \"250-1234567-8901234\",\n      \"createdTime\": \"2024-12-25T02:30:00Z\",\n      \"salesChannel\": {\n        \"channelName\": \"AMAZON\",\n        \"marketplaceId\": \"A1VC38T7YXB528\",\n        \"marketplaceName\": \"Amazon.co.jp\"\n      },\n      \"proceeds\": {\n        \"grandTotal\": {\n          \"amount\": \"19940\",\n          \"currencyCode\": \"JPY\"\n        }\n      },\n      \"fulfillment\": {\n        \"fulfillmentStatus\": \"SHIPPED\",\n        \"fulfilledBy\": \"AMAZON\"\n      },\n      \"orderItems\": [\n        {\n          \"orderItemId\": \"25012345678901\",\n          \"quantityOrdered\": 1,\n          \"product\": {\n            \"sellerSku\": \"ECHO-DOT-4-JP-CHARCOAL\",\n            \"price\": {\n              \"unitPrice\": {\n                \"amount\": \"5980\",\n                \"currencyCode\": \"JPY\"\n              }\n            }\n          },\n          \"proceeds\": {\n            \"proceedsTotal\": {\n              \"amount\": \"5980\",\n              \"currencyCode\": \"JPY\"\n            },\n            \"breakdowns\": [\n              {\n                \"type\": \"ITEM\",\n                \"subtotal\": {\n                  \"amount\": \"5980\",\n                  \"currencyCode\": \"JPY\"\n                }\n              }\n            ]\n          },\n          \"fulfillment\": {\n            \"quantityFulfilled\": 1,\n            \"quantityUnfulfilled\": 0\n          }\n        },\n        {\n          \"orderItemId\": \"25012345678902\",\n          \"quantityOrdered\": 2,\n          \"product\": {\n            \"sellerSku\": \"FIRE-TV-4K-MAX-JP\",\n            \"price\": {\n              \"unitPrice\": {\n                \"amount\": \"6980\",\n                \"currencyCode\": \"JPY\"\n              }\n            }\n          },\n          \"proceeds\": {\n            \"proceedsTotal\": {\n              \"amount\": \"13960\",\n              \"currencyCode\": \"JPY\"\n            },\n            \"breakdowns\": [\n              {\n                \"type\": \"ITEM\",\n                \"subtotal\": {\n                  \"amount\": \"13960\",\n                  \"currencyCode\": \"JPY\"\n                }\n              }\n            ]\n          },\n          \"fulfillment\": {\n            \"quantityFulfilled\": 2,\n            \"quantityUnfulfilled\": 0\n          }\n        }\n      ]\n    },\n    {\n      \"orderId\": \"250-2222222-3333333\",\n      \"createdTime\": \"2024-12-25T04:00:00Z\",\n      \"salesChannel\": {\n        \"channelName\": \"AMAZON\",\n        \"marketplaceId\": \"A1VC38T7YXB528\",\n        \"marketplaceName\": \"Amazon.co.jp\"\n      },\n      \"proceeds\": {\n        \"grandTotal\": {\n          \"amount\": \"3000\",\n          \"currencyCode\": \"JPY\"\n        }\n      },\n      \"fulfillment\": {\n        \"fulfillmentStatus\": \"SHIPPED\",\n        \"fulfilledBy\": \"AMAZON\"\n      },\n      \"orderItems\": [\n        {\n          \"orderItemId\": \"25022222223333\",\n          \"quantityOrdered\": 2,\n          \"product\": {\n            \"sellerSku\": \"TEST-FBA-SKU-001\",\n            \"price\": {\n              \"unitPrice\": {\n                \"amount\": \"1500\",\n                \"currencyCode\": \"JPY\"\n              }\n            }\n          },\n          \"proceeds\": {\n            \"proceedsTotal\": {\n              \"amount\": \"3000\",\n              \"currencyCode\": \"JPY\"\n            },\n            \"breakdowns\": [\n              {\n                \"type\": \"ITEM\",\n                \"subtotal\": {\n                  \"amount\": \"3000\",\n                  \"currencyCode\": \"JPY\"\n                }\n              }\n            ]\n          },\n          \"fulfillment\": {\n            \"quantityFulfilled\": 2,\n            \"quantityUnfulfilled\": 0\n          }\n        }\n      ]\n    },\n    {\n      \"orderId\": \"250-4444444-5555555\",\n      \"createdTime\": \"2024-12-25T05:00:00Z\",\n      \"salesChannel\": {\n        \"channelName\": \"AMAZON\",\n        \"marketplaceId\": \"A1VC38T7YXB528\",\n        \"marketplaceName\": \"Amazon.co.jp\"\n      },\n      \"proceeds\": {\n        \"grandTotal\": {\n          \"amount\": \"6600\",\n          \"currencyCode\": \"JPY\"\n        }\n      },\n      \"fulfillment\": {\n        \"fulfillmentStatus\": \"PARTIALLY_SHIPPED\",\n        \"fulfilledBy\": \"AMAZON\"\n      },\n      \"orderItems\": [\n        {\n          \"orderItemId\": \"25044444445555\",\n          \"quantityOrdered\": 3,\n          \"product\": {\n            \"sellerSku\": \"TEST-FBA-SKU-002\",\n            \"price\": {\n              \"unitPrice\": {\n                \"amount\": \"2200\",\n                \"currencyCode\": \"JPY\"\n              }\n            }\n          },\n          \"proceeds\": {\n            \"proceedsTotal\": {\n              \"amount\": \"6600\",\n              \"currencyCode\": \"JPY\"\n            },\n            \"breakdowns\": [\n              {\n                \"type\": \"ITEM\",\n                \"subtotal\": {\n                  \"amount\": \"6600\",\n                  \"currencyCode\": \"JPY\"\n                }\n              }\n            ]\n          },\n          \"fulfillment\": {\n            \"quantityFulfilled\": 1,\n            \"quantityUnfulfilled\": 2\n          }\n        }\n      ]\n    }\n  ],\n  \"pagination\": {}\n}\n"
+            }
+          ]
+        },
+        {
+          "name": "Mock 3 order request",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "\r\nconst data = pm.response.json();\r\nconst orders = data.orders || [];\r\nconst ids = orders.map(o => o.orderId);\r\n\r\npm.test(\"Retrieved 3 orders\", () => {\r\n    pm.expect(orders.length).to.eql(3);\r\n});\r\n\r\npm.test(\"All order IDs are unique\", () => {\r\n    pm.expect(new Set(ids).size).to.eql(orders.length);\r\n});\r\n\r\npm.test(\"All orders are FBA\", () => {\r\n    pm.expect(orders.every(o =>\r\n        o.fulfillment?.fulfilledBy === \"AMAZON\"\r\n    )).to.be.true;\r\n});\r\n\r\npm.test(\"All orders contain line items\", () => {\r\n    pm.expect(orders.every(o =>\r\n        o.orderItems?.length > 0\r\n    )).to.be.true;\r\n});\r\n\r\norders.forEach(o => {\r\n    console.log(\r\n        o.orderId,\r\n        o.fulfillment?.fulfillmentStatus,\r\n        o.orderItems.length + \" lines\"\r\n    );\r\n});\r\n"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://2b904d08-70bc-472e-a150-fcaf96eda99f.mock.pstmn.io/orders/2026-01-01/orders",
+              "protocol": "https",
+              "host": [
+                "2b904d08-70bc-472e-a150-fcaf96eda99f",
+                "mock",
+                "pstmn",
+                "io"
+              ],
+              "path": [
+                "orders",
+                "2026-01-01",
+                "orders"
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Orders API v2026-01-01. Shows Amazon FBA orders can be pulled for creation in SyteLine under the Amazon customer."
+    },
+    {
+      "name": "3. RMA connector",
+      "item": [
+        {
+          "name": "3.1 Create returns report",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const now = new Date();",
+                  "pm.collectionVariables.set(\"returnsEnd\", now.toISOString());",
+                  "pm.collectionVariables.set(\"returnsStart\", new Date(now.getTime() - 14*24*3600*1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report accepted\", () => pm.expect([200, 202]).to.include(pm.response.code));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set(\"reportId\", j.reportId);",
+                  "console.log(\"reportId\", j.reportId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reportType\": \"GET_FBA_FULFILLMENT_CUSTOMER_RETURNS_DATA\",\n  \"marketplaceIds\": [\n    \"{{marketplaceId}}\"\n  ],\n  \"dataStartTime\": \"{{returnsStart}}\",\n  \"dataEndTime\": \"{{returnsEnd}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/reports/2021-06-30/reports",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "2021-06-30",
+                "reports"
+              ]
+            },
+            "description": "RMA connector, step 1. Requests the FBA customer returns report. Updated daily by Amazon, so in production run once a day over the last 7 to 14 days."
+          },
+          "response": []
+        },
+        {
+          "name": "3.2 Get report status",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "console.log(\"processingStatus:\", j.processingStatus);",
+                  "if (j.reportDocumentId) pm.collectionVariables.set(\"reportDocumentId\", j.reportDocumentId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/2021-06-30/reports/{{reportId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "2021-06-30",
+                "reports",
+                "{{reportId}}"
+              ]
+            },
+            "description": "RMA connector, step 2. Run repeatedly (every 30 to 60 seconds) until processingStatus is DONE. CANCELLED or FATAL means stop and log. A DONE report returns reportDocumentId, which is saved automatically."
+          },
+          "response": []
+        },
+        {
+          "name": "3.3 Get report document link",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "pm.collectionVariables.set(\"documentUrl\", j.url);",
+                  "console.log(\"compressionAlgorithm:\", j.compressionAlgorithm);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/2021-06-30/documents/{{reportDocumentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "2021-06-30",
+                "documents",
+                "{{reportDocumentId}}"
+              ]
+            },
+            "description": "RMA connector, step 3. Returns a short lived pre-signed url and a compression setting (usually GZIP). The url is saved for 3.4."
+          },
+          "response": []
+        },
+        {
+          "name": "3.4 Download report file",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const lines = pm.response.text().split(\"\\n\").filter(l => l.trim());",
+                  "console.log(\"Header:\", lines[0]);",
+                  "console.log(\"Return rows:\", Math.max(lines.length - 1, 0));",
+                  "const hdr = (lines[0] || \"\").split(\"\\t\");",
+                  "const di = hdr.indexOf(\"detailed-disposition\");",
+                  "if (di >= 0) {",
+                  "  const d = {};",
+                  "  lines.slice(1).forEach(l => { const v = l.split(\"\\t\")[di]; d[v] = (d[v] || 0) + 1; });",
+                  "  console.log(\"Dispositions (map each to Stock or Scrap):\", JSON.stringify(d));",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "auth": {
+              "type": "noauth"
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": ""
+            },
+            "description": "RMA connector, step 4. The url is pre-signed, so no Amazon token is sent. The file is tab delimited text (possibly GZIP). Key columns: return-date, order-id, sku, asin, fnsku, quantity, fulfillment-center-id, detailed-disposition, reason, status, license-plate-number. If Postman shows unreadable output, use Send and Download and open the file with a gzip tool."
+          },
+          "response": []
+        }
+      ],
+      "description": "Reports API. Shows FBA returns and dispositions can be pulled for RMAs in SyteLine."
+    },
+    {
+      "name": "4. Payments",
+      "item": [
+        {
+          "name": "4.1 List payout groups",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"paymentsStart\", new Date(Date.now() - 60*24*3600*1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const g = (j.payload && j.payload.FinancialEventGroupList) || [];",
+                  "g.forEach(x => console.log(x.FinancialEventGroupId, x.ProcessingStatus, x.FundTransferStatus, \"OriginalTotal\", x.OriginalTotal && x.OriginalTotal.CurrencyAmount, x.FundTransferDate));",
+                  "const closed = g.find(x => x.ProcessingStatus === \"Closed\");",
+                  "const pick = closed || g[0];",
+                  "if (pick) {",
+                  "  pm.collectionVariables.set(\"financialEventGroupId\", pick.FinancialEventGroupId);",
+                  "  pm.collectionVariables.set(\"groupOriginalTotal\", String(pick.OriginalTotal ? pick.OriginalTotal.CurrencyAmount : \"\"));",
+                  "  console.log(\"Selected group\", pick.FinancialEventGroupId);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/finances/v0/financialEventGroups?FinancialEventGroupStartedAfter={{paymentsStart}}&MaxResultsPerPage=100",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finances",
+                "v0",
+                "financialEventGroups"
+              ],
+              "query": [
+                {
+                  "key": "FinancialEventGroupStartedAfter",
+                  "value": "{{paymentsStart}}"
+                },
+                {
+                  "key": "MaxResultsPerPage",
+                  "value": "100"
+                }
+              ]
+            },
+            "description": "Payments, step 1. Each group is one Amazon payout. OriginalTotal is the amount deposited to the bank. Use closed groups with a transferred FundTransferStatus. Needs the Finance and Accounting role on the app. This v0 call is used in Amazon's own guide for finding payouts; confirm it is still supported before build."
+          },
+          "response": []
+        },
+        {
+          "name": "SANDBOX - 4.1 List payout groups",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"paymentsStart\", new Date(Date.now() - 60*24*3600*1000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));\nconst j = pm.response.json();\nconst g = (j.payload && j.payload.FinancialEventGroupList) || [];\ng.forEach(x => console.log(x.FinancialEventGroupId, x.ProcessingStatus, x.FundTransferStatus, \"OriginalTotal\", x.OriginalTotal && x.OriginalTotal.CurrencyAmount, x.FundTransferDate));\nconst closed = g.find(x => x.ProcessingStatus === \"Closed\");\nconst pick = closed || g[0];\nif (pick) {\n  pm.collectionVariables.set(\"financialEventGroupId\", pick.FinancialEventGroupId);\n  pm.collectionVariables.set(\"groupOriginalTotal\", String(pick.OriginalTotal ? pick.OriginalTotal.CurrencyAmount : \"\"));\n  console.log(\"Selected group\", pick.FinancialEventGroupId);\n}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://sandbox.sellingpartnerapi-na.amazon.com/finances/v0/financialEventGroups?MaxResultsPerPage=1&FinancialEventGroupStartedBefore=2019-10-31&FinancialEventGroupStartedAfter=2019-10-13",
+              "protocol": "https",
+              "host": [
+                "sandbox",
+                "sellingpartnerapi-na",
+                "amazon",
+                "com"
+              ],
+              "path": [
+                "finances",
+                "v0",
+                "financialEventGroups"
+              ],
+              "query": [
+                {
+                  "key": "MaxResultsPerPage",
+                  "value": "1"
+                },
+                {
+                  "key": "FinancialEventGroupStartedBefore",
+                  "value": "2019-10-31"
+                },
+                {
+                  "key": "FinancialEventGroupStartedAfter",
+                  "value": "2019-10-13"
+                }
+              ]
+            },
+            "description": "Payments, step 1. Each group is one Amazon payout. OriginalTotal is the amount deposited to the bank. Use closed groups with a transferred FundTransferStatus. Needs the Finance and Accounting role on the app. This v0 call is used in Amazon's own guide for finding payouts; confirm it is still supported before build."
+          },
+          "response": []
+        },
+        {
+          "name": "4.2 List released transactions in a payout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const tx = (j.payload && j.payload.transactions) || j.transactions || [];",
+                  "const next = (j.payload && j.payload.nextToken) || j.nextToken || \"\";",
+                  "pm.collectionVariables.set(\"transactionsNextToken\", next);",
+                  "let sum = 0, withOrder = 0, noOrder = 0;",
+                  "const types = {};",
+                  "tx.forEach(t => {",
+                  "  sum += Number(t.totalAmount ? t.totalAmount.currencyAmount : 0);",
+                  "  const hasOrder = (t.relatedIdentifiers || []).some(r => r.relatedIdentifierName === \"ORDER_ID\");",
+                  "  hasOrder ? withOrder++ : noOrder++;",
+                  "  (t.breakdowns || []).forEach(x => { types[x.breakdownType] = (types[x.breakdownType] || 0) + Number(x.breakdownAmount ? x.breakdownAmount.currencyAmount : 0); });",
+                  "});",
+                  "sum = Math.round(sum * 100) / 100;",
+                  "const target = Number(pm.collectionVariables.get(\"groupOriginalTotal\"));",
+                  "console.log(\"Transactions this page:\", tx.length, \"with ORDER_ID:\", withOrder, \"without (fees, adjustments, other):\", noOrder);",
+                  "console.log(\"Sum of totalAmount this page:\", sum, \"| Payout OriginalTotal (bank):\", target, \"| more pages:\", next ? \"yes\" : \"no\");",
+                  "console.log(\"Top level breakdown totals (map each type to a GL account):\", JSON.stringify(types));",
+                  "if (!next) console.log(Math.abs(sum - target) < 0.005 ? \"BALANCES: transactions equal the bank deposit\" : \"DOES NOT BALANCE: difference \" + Math.round((sum - target) * 100) / 100 + \" (check reserves, deferred items, or whether the group is closed)\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/finances/2024-06-19/transactions?relatedIdentifierName=FINANCIAL_EVENT_GROUP_ID&relatedIdentifierValue={{financialEventGroupId}}&transactionStatus=RELEASED",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finances",
+                "2024-06-19",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "relatedIdentifierName",
+                  "value": "FINANCIAL_EVENT_GROUP_ID"
+                },
+                {
+                  "key": "relatedIdentifierValue",
+                  "value": "{{financialEventGroupId}}"
+                },
+                {
+                  "key": "transactionStatus",
+                  "value": "RELEASED"
+                },
+                {
+                  "key": "nextToken",
+                  "value": "{{transactionsNextToken}}",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Payments, step 2. Every transaction that makes up the payout selected in 4.1. Up to 500 per page. If nextToken is returned, it is saved; enable the nextToken parameter and send again (the running total on later pages must be added by hand). Rate limit 0.5 per second, burst 10. The test script totals the transactions and compares them to the bank amount (OriginalTotal) to show whether the payout balances. Transactions not tied to an order (fees, adjustments, reserves, transfers) still count toward the total."
+          },
+          "response": []
+        },
+        {
+          "name": "4.3 List transactions for one order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const tx = (j.payload && j.payload.transactions) || j.transactions || [];",
+                  "tx.forEach(t => {",
+                  "  console.log(t.description, t.transactionStatus, t.postedDate, \"total\", t.totalAmount && t.totalAmount.currencyAmount);",
+                  "  (t.breakdowns || []).forEach(b => console.log(\"   \", b.breakdownType, b.breakdownAmount && b.breakdownAmount.currencyAmount));",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/finances/2024-06-19/transactions?relatedIdentifierName=ORDER_ID&relatedIdentifierValue={{orderId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finances",
+                "2024-06-19",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "relatedIdentifierName",
+                  "value": "ORDER_ID"
+                },
+                {
+                  "key": "relatedIdentifierValue",
+                  "value": "{{orderId}}"
+                }
+              ]
+            },
+            "description": "Payments, tracing. Shows how a single order was paid: principal, tax, shipping, commission and FBA fees, and any refund. Use to show one invoice can be applied with its fees as allowances. Uses the orderId saved by 2.1. Orders from the last 48 hours may not have financial events yet."
+          },
+          "response": []
+        },
+        {
+          "name": "4.4 Balances (reserves and deferred)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "console.log(pm.response.text().slice(0, 1500));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/finances/2024-06-19/balances?marketplaceIds={{marketplaceId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "finances",
+                "2024-06-19",
+                "balances"
+              ],
+              "query": [
+                {
+                  "key": "marketplaceIds",
+                  "value": "{{marketplaceId}}"
+                }
+              ]
+            },
+            "description": "Optional. Explains held back funds such as reserves and deferred balances, which can make a payout smaller than expected."
+          },
+          "response": []
+        },
+        {
+          "name": "4.5 Find settlement reports (control total)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Status 200\", () => pm.response.to.have.status(200));",
+                  "const j = pm.response.json();",
+                  "const r = j.reports || [];",
+                  "r.forEach(x => console.log(x.reportId, x.processingStatus, x.dataStartTime, x.dataEndTime, x.reportDocumentId));",
+                  "if (r.length && r[0].reportDocumentId) pm.collectionVariables.set(\"reportDocumentId\", r[0].reportDocumentId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/reports/2021-06-30/reports?reportTypes=GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2&pageSize=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "reports",
+                "2021-06-30",
+                "reports"
+              ],
+              "query": [
+                {
+                  "key": "reportTypes",
+                  "value": "GET_V2_SETTLEMENT_REPORT_DATA_FLAT_FILE_V2"
+                },
+                {
+                  "key": "pageSize",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Optional cross-check. Amazon creates settlement reports automatically; they cannot be requested. List them here, then run 3.3 and 3.4 using the reportDocumentId saved by this call. The report holds settlement-id, total-amount and deposit-date and can be compared to the payout total from 4.1."
+          },
+          "response": []
+        },
+        {
+          "name": "SANDBOX - 4.6 Financial Transactions (NOT WORKING)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://sandbox.sellingpartnerapi-na.amazon.com/finances/2024-06-19/transactions?postedAfter=2023-03-07&nextToken=jehgri34yo7jr9e8f984tr9i4o",
+              "protocol": "https",
+              "host": [
+                "sandbox",
+                "sellingpartnerapi-na",
+                "amazon",
+                "com"
+              ],
+              "path": [
+                "finances",
+                "2024-06-19",
+                "transactions"
+              ],
+              "query": [
+                {
+                  "key": "postedAfter",
+                  "value": "2023-03-07"
+                },
+                {
+                  "key": "nextToken",
+                  "value": "jehgri34yo7jr9e8f984tr9i4o"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "4.7 Finances Summary FBA Fees (Sandbox)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "https://sandbox.sellingpartnerapi-na.amazon.com/finances/2024-06-19/summary?marketplaceIds=AXXXXXXXXXER&periodStart=2025-01-12&periodEnd=2025-01-12",
+              "protocol": "https",
+              "host": [
+                "sandbox",
+                "sellingpartnerapi-na",
+                "amazon",
+                "com"
+              ],
+              "path": [
+                "finances",
+                "2024-06-19",
+                "summary"
+              ],
+              "query": [
+                {
+                  "key": "marketplaceIds",
+                  "value": "AXXXXXXXXXER"
+                },
+                {
+                  "key": "periodStart",
+                  "value": "2025-01-12"
+                },
+                {
+                  "key": "periodEnd",
+                  "value": "2025-01-12"
+                }
+              ]
+            }
+          },
+          "response": []
+        }
+      ],
+      "description": "Finances API and settlement report. Shows a payout can be broken into per order payments, fees and adjustments that equal the bank deposit."
+    }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "x-amz-access-token",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{accessToken}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// Required by Amazon on every call",
+          "pm.request.headers.upsert({ key: \"user-agent\", value: \"HubKorAmazonPOC/1.0 (Language=JavaScript)\" });",
+          "const host = pm.request.url.getHost();",
+          "if (!host.includes(\"sellingpartnerapi\")) return;   // token call and file download skip this",
+          "const expiry = parseInt(pm.collectionVariables.get(\"tokenExpiry\") || \"0\", 10);",
+          "if (pm.collectionVariables.get(\"accessToken\") && Date.now() < expiry) return;",
+          "const tokenReq = {",
+          "  url: \"https://api.amazon.com/auth/o2/token\",",
+          "  method: \"POST\",",
+          "  header: { \"Content-Type\": \"application/x-www-form-urlencoded\" },",
+          "  body: { mode: \"urlencoded\", urlencoded: [",
+          "    { key: \"grant_type\", value: \"refresh_token\" },",
+          "    { key: \"refresh_token\", value: pm.variables.get(\"refreshToken\") },",
+          "    { key: \"client_id\", value: pm.variables.get(\"clientId\") },",
+          "    { key: \"client_secret\", value: pm.variables.get(\"clientSecret\") } ] }",
+          "};",
+          "pm.sendRequest(tokenReq, (err, res) => {",
+          "  if (err || res.code !== 200) { console.error(\"Token refresh failed\", err || res.text()); return; }",
+          "  const j = res.json();",
+          "  pm.collectionVariables.set(\"accessToken\", j.access_token);",
+          "  pm.collectionVariables.set(\"tokenExpiry\", String(Date.now() + (j.expires_in - 120) * 1000));",
+          "  pm.request.headers.upsert({ key: \"x-amz-access-token\", value: j.access_token });",
+          "  console.log(\"Access token refreshed\");",
+          "});"
+        ],
+        "type": "text/javascript"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://sellingpartnerapi-na.amazon.com"
+    },
+    {
+      "key": "marketplaceId",
+      "value": "ATVPDKIKX0DER"
+    },
+    {
+      "key": "accessToken",
+      "value": ""
+    },
+    {
+      "key": "tokenExpiry",
+      "value": "0"
+    },
+    {
+      "key": "lastUpdatedAfter",
+      "value": ""
+    },
+    {
+      "key": "orderId",
+      "value": ""
+    },
+    {
+      "key": "paginationToken",
+      "value": ""
+    },
+    {
+      "key": "returnsStart",
+      "value": ""
+    },
+    {
+      "key": "returnsEnd",
+      "value": ""
+    },
+    {
+      "key": "reportId",
+      "value": ""
+    },
+    {
+      "key": "reportDocumentId",
+      "value": ""
+    },
+    {
+      "key": "documentUrl",
+      "value": ""
+    },
+    {
+      "key": "paymentsStart",
+      "value": ""
+    },
+    {
+      "key": "financialEventGroupId",
+      "value": ""
+    },
+    {
+      "key": "groupOriginalTotal",
+      "value": ""
+    },
+    {
+      "key": "transactionsNextToken",
+      "value": ""
+    }
+  ]
+}

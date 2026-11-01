@@ -1,0 +1,75 @@
+{
+  "orders": [
+    {
+      "orderId": "113-4100001-0000001",
+      "createdTime": "2026-10-30T09:15:00Z",
+      "salesChannel": { "channelName": "AMAZON", "marketplaceId": "ATVPDKIKX0DER", "marketplaceName": "Amazon.com" },
+      "proceeds": { "grandTotal": { "amount": "149.97", "currencyCode": "USD" } },
+      "fulfillment": { "fulfillmentStatus": "SHIPPED", "fulfilledBy": "AMAZON" },
+      "orderItems": [
+        {
+          "orderItemId": "41000010000011",
+          "quantityOrdered": 2,
+          "product": { "sellerSku": "DEMO-001", "price": { "unitPrice": { "amount": "49.99", "currencyCode": "USD" } } },
+          "proceeds": { "proceedsTotal": { "amount": "99.98", "currencyCode": "USD" } },
+          "fulfillment": { "quantityFulfilled": 2, "quantityUnfulfilled": 0 }
+        },
+        {
+          "orderItemId": "41000010000012",
+          "quantityOrdered": 1,
+          "product": { "sellerSku": "DEMO-002", "price": { "unitPrice": { "amount": "49.99", "currencyCode": "USD" } } },
+          "proceeds": { "proceedsTotal": { "amount": "49.99", "currencyCode": "USD" } },
+          "fulfillment": { "quantityFulfilled": 1, "quantityUnfulfilled": 0 }
+        }
+      ]
+    },
+    {
+      "orderId": "113-4100002-0000002",
+      "createdTime": "2026-10-30T10:02:00Z",
+      "salesChannel": { "channelName": "AMAZON", "marketplaceId": "ATVPDKIKX0DER", "marketplaceName": "Amazon.com" },
+      "proceeds": { "grandTotal": { "amount": "24.50", "currencyCode": "USD" } },
+      "fulfillment": { "fulfillmentStatus": "UNSHIPPED", "fulfilledBy": "AMAZON" },
+      "orderItems": [
+        {
+          "orderItemId": "41000020000021",
+          "quantityOrdered": 1,
+          "product": { "sellerSku": "DEMO-003", "price": { "unitPrice": { "amount": "24.50", "currencyCode": "USD" } } },
+          "proceeds": { "proceedsTotal": { "amount": "24.50", "currencyCode": "USD" } },
+          "fulfillment": { "quantityFulfilled": 0, "quantityUnfulfilled": 1 }
+        }
+      ]
+    },
+    {
+      "orderId": "113-4100003-0000003",
+      "createdTime": "2026-10-30T10:40:00Z",
+      "salesChannel": { "channelName": "AMAZON", "marketplaceId": "ATVPDKIKX0DER", "marketplaceName": "Amazon.com" },
+      "proceeds": { "grandTotal": { "amount": "79.00", "currencyCode": "USD" } },
+      "fulfillment": { "fulfillmentStatus": "SHIPPED", "fulfilledBy": "AMAZON" },
+      "orderItems": [
+        {
+          "orderItemId": "41000030000031",
+          "quantityOrdered": 1,
+          "product": { "sellerSku": "NOT-IN-SYTELINE-999", "price": { "unitPrice": { "amount": "79.00", "currencyCode": "USD" } } },
+          "proceeds": { "proceedsTotal": { "amount": "79.00", "currencyCode": "USD" } },
+          "fulfillment": { "quantityFulfilled": 1, "quantityUnfulfilled": 0 }
+        }
+      ]
+    },
+    {
+      "orderId": "113-4100004-0000004",
+      "createdTime": "2026-10-30T11:05:00Z",
+      "salesChannel": { "channelName": "AMAZON", "marketplaceId": "ATVPDKIKX0DER", "marketplaceName": "Amazon.com" },
+      "proceeds": { "grandTotal": { "amount": "0.00", "currencyCode": "USD" } },
+      "fulfillment": { "fulfillmentStatus": "PENDING", "fulfilledBy": "AMAZON" },
+      "orderItems": [
+        {
+          "orderItemId": "41000040000041",
+          "quantityOrdered": 1,
+          "product": { "sellerSku": "DEMO-001" },
+          "fulfillment": { "quantityFulfilled": 0, "quantityUnfulfilled": 1 }
+        }
+      ]
+    }
+  ],
+  "pagination": {}
+}

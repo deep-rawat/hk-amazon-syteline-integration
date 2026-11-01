@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Mongoose IDO extension classes run on .NET Framework. Match the version your
+       Mongoose release uses (4.7.2 / 4.8); check the Infor dev kit release notes. -->
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>7.3</LangVersion>
+    <AssemblyName>HubKor.AmazonSync</AssemblyName>
+    <RootNamespace>HubKor.AmazonSync</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <Version>1.0.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System" />
+    <Reference Include="System.Data" />
+  </ItemGroup>
+
+  <!-- Copy these from the Mongoose / CloudSuite Industrial IDO extension class dev kit into .\lib.
+       Copy Local = false: Mongoose already has them loaded at runtime, so they are not uploaded. -->
+  <ItemGroup>
+    <Reference Include="IDOCore"><HintPath>lib\IDOCore.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="IDOBase"><HintPath>lib\IDOBase.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="IDOProtocol"><HintPath>lib\IDOProtocol.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="MGShared"><HintPath>lib\MGShared.dll</HintPath><Private>false</Private></Reference>
+    <Reference Include="WSEnums"><HintPath>lib\WSEnums.dll</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+
+</Project>

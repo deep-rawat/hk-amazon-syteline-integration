@@ -92,6 +92,18 @@ Part 3.
 
 ## Part 2: Master data for Amazon (30 minutes)
 
+> **Status: ✅ done via the ION API on 2026-11-01, site DALS** (configuration `QUADKOR_AX1_DALS`):
+> - Customer `AMAZONU` "Amazon.com (US Marketplace) - HubKor Demo": USD, terms M36, tax code NT
+>   (Tax Exempt), warehouse MAIN, salesperson GIB.
+> - Items `DEMO-001`, `DEMO-002`, `DEMO-003`: UM EA, product code FG-100, Purchased.
+> - Test order `AMZTEST001` (Customer PO `TEST-API-0001`) with 3 lines proves the API can create
+>   orders. Delete it before the client demo.
+> - Customer #54 "Amazon" already existed. We don't use it.
+>
+> Lesson learned: unlike the form, the API doesn't fill in defaults. The header needs
+> `CurrCode`, `TermsCode`, `TaxCode1` and `Slsman`, and lines need `UM` and `Stat`. The code now
+> copies them from the customer and item.
+
 ### Step 2.1: Create the Amazon customer
 - [ ] **Customers → New**, then fill in:
   - Customer: `AMAZONU`
@@ -123,6 +135,10 @@ warehouse record, fix the item or customer setup now. The integration would fail
 
 ## Part 3: Confirm the field names the code uses (30 minutes)
 
+> **Status: ✅ done via the ION API.** All properties used by the code exist on SLCos, SLCoitems,
+> SLItems and SLCustomers. Customer numbers are stored right-justified (`"      2"`); the code
+> handles that. CO number style `AMZ0000001` fits the existing pattern (e.g. `DC00001109`).
+
 The code talks to SyteLine through **IDOs**, SyteLine's data objects. Each IDO has **properties**,
 which are its field names. We confirm them now.
 
@@ -151,37 +167,83 @@ change the code.
 
 ## Part 4: Create the two custom tables (1 hour)
 
-### Step 4.1: Config table
-- [ ] Open **SQL Tables** (or "Application Schema Tables"). Create table **`ue_HK_AmazonConfig`**.
-- [ ] If there's an option such as "Add standard columns" / "Include RowPointer and audit columns",
-  **tick it**. SyteLine needs `RowPointer`, `CreatedBy`, `UpdatedBy`, `CreateDate`, `RecordDate`,
-  `NoteExistsFlag` and `InWorkflow` on every table.
-- [ ] Add the columns from the **ue_HK_AmazonConfig** table in [README.md](README.md). Make
-  **ConfigId** the primary key.
-- [ ] Click **Create/Commit** (the button that actually creates the table in the database).
+Naming follows the existing HubKor custom tables in this tenant (e.g. `ue_hk_ap_auto_activitylog`):
+lowercase `ue_hk_` table names, PascalCase column names, and no `_mst` / site column. The tables
+hold integration data, not site-specific business data.
 
-### Step 4.2: Log table
-- [ ] Same for **`ue_HK_AmazonOrderLog`** with the columns from the README. Primary key =
-  **AmazonOrderId**.
+General rules for both tables:
+- **Standard columns:** if the form offers "Add standard/audit columns", tick it. SyteLine needs
+  `RowPointer`, `CreatedBy`, `UpdatedBy`, `CreateDate`, `RecordDate`, `NoteExistsFlag` and
+  `InWorkflow` on every table. If you add them by hand, copy their types from an existing table
+  such as `ue_hk_ap_auto_activitylog` in the same form.
+- **Column names:** type them **exactly** as listed, including upper/lower case. The code uses
+  these names.
+- **Nullable:** every column except the primary key may be NULL.
+- At the end, click the button that **creates the table in the database** (e.g. *Create Table* /
+  *Commit* / *Generate*). Saving the form record alone may only save the definition.
 
-✅ Check: both tables appear in the list with all columns.
+### Step 4.1: Config table `ue_hk_amazon_config`
+
+| Column | Data type | Length | Notes |
+|---|---|---|---|
+| ConfigId | nvarchar | 20 | **Primary key**, not null |
+| Active | tinyint | | |
+| BaseUrl | nvarchar | 200 | |
+| ClientId | nvarchar | 200 | |
+| ClientSecret | nvarchar | 500 | |
+| RefreshToken | nvarchar | 1000 | |
+| MarketplaceId | nvarchar | 20 | |
+| FulfilledBy | nvarchar | 10 | |
+| QueryOverride | nvarchar | 1000 | |
+| CustNum | nvarchar | 7 | |
+| CustSeq | int | | |
+| Whse | nvarchar | 4 | |
+| CoStat | nchar | 1 | |
+| CoPrefix | nvarchar | 5 | |
+| NextCoSeq | int | | |
+| LastSyncUtc | datetime | | |
+| LookbackDays | int | | |
+
+### Step 4.2: Log table `ue_hk_amazon_order_log`
+
+| Column | Data type | Length | Notes |
+|---|---|---|---|
+| AmazonOrderId | nvarchar | 30 | **Primary key**, not null |
+| CreatedTimeUtc | datetime | | |
+| AmazonStatus | nvarchar | 30 | |
+| SyncStatus | nvarchar | 10 | |
+| CoNum | nvarchar | 10 | |
+| Message | nvarchar | 1000 | |
+| LineCount | int | | |
+| OrderTotal | decimal | 18,4 | |
+| Currency | nvarchar | 3 | |
+| Attempts | int | | |
+| LastAttempt | datetime | | |
+| RawJson | nvarchar | max | the form may write max as `-1` or `MAX` |
+
+✅ Check: both tables appear in **SQL Tables** with all columns. Tell me when they're done, and I'll
+verify them through the API.
 
 ---
 
 ## Part 5: Create IDOs for the tables (30 minutes)
 
 ### Step 5.1: Config IDO
+The IDO names must be exactly these, because the code calls them by name. The table names are
+only used here.
+
 - [ ] In the **IDOs** form, use **New IDO wizard** (Actions menu), or search for an "IDO Wizard"
   form.
 - [ ] Project: choose (or create) a custom project, e.g. `HK_Amazon`.
-- [ ] IDO name: **`ue_HK_AmazonConfigs`**. Base table: `ue_HK_AmazonConfig`. Add **all columns**
-  as properties and keep the names unchanged.
+- [ ] IDO name: **`ue_HK_AmazonConfigs`**. Base table: `ue_hk_amazon_config`. Add **all columns**
+  as properties and **keep the property names identical to the column names** (the wizard default).
 - [ ] Finish, then **check in** the IDO (IDOs are checked out while you edit them).
 
 ### Step 5.2: Log IDO
-- [ ] Same for **`ue_HK_AmazonOrderLogs`** on `ue_HK_AmazonOrderLog`.
+- [ ] Same for **`ue_HK_AmazonOrderLogs`** on table `ue_hk_amazon_order_log`.
 
-✅ Check: the IDOs form shows both IDOs with their properties.
+✅ Check: the IDOs form shows both IDOs with their properties. Tell me, and I'll test loading
+them through the API.
 
 ---
 
@@ -296,7 +358,7 @@ form in Part 9 first and come back. The values:
 | FulfilledBy | *(blank)* |
 | CustNum | `AMAZONU` |
 | CustSeq | `0` |
-| Whse | your warehouse from Step 1.1 |
+| Whse | `MAIN` |
 | CoStat | `O` |
 | CoPrefix | `AMZ` (or what you chose in 3.4) |
 | NextCoSeq | `1` |

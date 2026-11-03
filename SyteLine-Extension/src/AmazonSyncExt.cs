@@ -28,7 +28,7 @@ namespace HubKor.AmazonSync
         private const string Skipped = "Skipped";
         private const string Warning = "Warning";
 
-        private readonly Dictionary<string, string> _itemCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, ItemInfo> _itemCache = new Dictionary<string, ItemInfo>(StringComparer.OrdinalIgnoreCase);
 
         [IDOMethod(MethodFlags.None, "Infobar")]
         public int ue_HK_SyncAmazonOrders(string ConfigId, ref string Infobar)
@@ -36,7 +36,7 @@ namespace HubKor.AmazonSync
             try
             {
                 var cfg = LoadConfig(string.IsNullOrWhiteSpace(ConfigId) ? "DEFAULT" : ConfigId);
-                cfg.CustNum = ResolveCustNum(cfg.CustNum);
+                LoadCustomer(cfg);
 
                 var runStartUtc = DateTime.UtcNow;
                 var since = cfg.LastSyncUtc == DateTime.MinValue
@@ -110,7 +110,7 @@ namespace HubKor.AmazonSync
                     missing.Add(sku);
                     continue;
                 }
-                lines.Add(new CoLine { Item = item, Qty = qty, UnitPrice = Json.Dec(orderItem, "product.price.unitPrice.amount") });
+                lines.Add(new CoLine { Item = item.Item, UM = item.UM, Qty = qty, UnitPrice = Json.Dec(orderItem, "product.price.unitPrice.amount") });
             }
 
             if (missing.Count > 0)
@@ -135,7 +135,7 @@ namespace HubKor.AmazonSync
 
         private void CreateCustomerOrder(AmazonConfig cfg, string coNum, string amazonOrderId, DateTime orderDate, List<CoLine> lines)
         {
-            Insert("SLCos", new Dictionary<string, string>
+            var header = new Dictionary<string, string>
             {
                 { "CoNum", coNum },
                 { "CustNum", cfg.CustNum },
@@ -144,7 +144,12 @@ namespace HubKor.AmazonSync
                 { "OrderDate", orderDate.Date.ToString(IdoDateFormat, CultureInfo.InvariantCulture) },
                 { "Whse", cfg.Whse },
                 { "Stat", cfg.CoStat },
-            });
+            };
+            AddIfSet(header, "CurrCode", cfg.CurrCode);
+            AddIfSet(header, "TermsCode", cfg.TermsCode);
+            AddIfSet(header, "TaxCode1", cfg.TaxCode1);
+            AddIfSet(header, "Slsman", cfg.Slsman);
+            Insert("SLCos", header);
 
             for (var i = 0; i < lines.Count; i++)
             {
@@ -154,10 +159,13 @@ namespace HubKor.AmazonSync
                     { "CoLine", (i + 1).ToString(CultureInfo.InvariantCulture) },
                     { "CoRelease", "0" },
                     { "Item", lines[i].Item },
+                    { "UM", lines[i].UM },
                     { "QtyOrderedConv", lines[i].Qty.ToString(CultureInfo.InvariantCulture) },
                     { "PriceConv", lines[i].UnitPrice.ToString(CultureInfo.InvariantCulture) },
                     { "DueDate", orderDate.Date.ToString(IdoDateFormat, CultureInfo.InvariantCulture) },
                     { "Whse", cfg.Whse },
+                    // Without this, lines are created as P (Planned) even on an Ordered header.
+                    { "Stat", cfg.CoStat },
                 });
             }
         }
@@ -181,25 +189,26 @@ namespace HubKor.AmazonSync
         // ------------------------------------------------------------------ lookups
 
         /// <summary>SKU -> Item: first Customer Items (SLItemcusts) for the Amazon customer, then an item with the same number.</summary>
-        private string ResolveItem(string sku, string custNum)
+        private ItemInfo ResolveItem(string sku, string custNum)
         {
             if (string.IsNullOrWhiteSpace(sku))
                 return null;
-            string item;
-            if (_itemCache.TryGetValue(sku, out item))
-                return item;
+            ItemInfo info;
+            if (_itemCache.TryGetValue(sku, out info))
+                return info;
 
+            var itemNum = sku;
             var byCustItem = Load("SLItemcusts", "Item", "CustNum = " + Q(custNum) + " AND CustItem = " + Q(sku), 1);
             if (byCustItem.Items.Count > 0)
-                item = byCustItem[0, "Item"].Value;
-            else
-            {
-                var byItem = Load("SLItems", "Item", "Item = " + Q(sku), 1);
-                item = byItem.Items.Count > 0 ? byItem[0, "Item"].Value : null;
-            }
+                itemNum = byCustItem[0, "Item"].Value;
 
-            _itemCache[sku] = item;
-            return item;
+            var byItem = Load("SLItems", "Item, UM", "Item = " + Q(itemNum), 1);
+            info = byItem.Items.Count > 0
+                ? new ItemInfo { Item = byItem[0, "Item"].Value, UM = byItem[0, "UM"].Value }
+                : null;
+
+            _itemCache[sku] = info;
+            return info;
         }
 
         private string FindCoByAmazonOrder(string custNum, string amazonOrderId)
@@ -209,16 +218,27 @@ namespace HubKor.AmazonSync
         }
 
         /// <summary>
-        /// SyteLine often stores CustNum right-justified with leading spaces, so look the
-        /// customer up and use the value exactly as stored.
+        /// Looks up the Amazon customer and copies its order defaults into the config.
+        /// SyteLine often stores CustNum right-justified with leading spaces, so the value is
+        /// used exactly as stored.
         /// </summary>
-        private string ResolveCustNum(string custNum)
+        private void LoadCustomer(AmazonConfig cfg)
         {
-            var trimmed = (custNum ?? "").Trim();
-            var r = Load("SLCustomers", "CustNum", "CustNum LIKE " + Q("%" + trimmed) + " AND CustSeq = 0", 0);
+            var trimmed = (cfg.CustNum ?? "").Trim();
+            var r = Load("SLCustomers", "CustNum, CurrCode, TermsCode, TaxCode1, Slsman",
+                "CustNum LIKE " + Q("%" + trimmed) + " AND CustSeq = 0", 0);
             for (var i = 0; i < r.Items.Count; i++)
-                if (r[i, "CustNum"].Value.Trim().Equals(trimmed, StringComparison.OrdinalIgnoreCase))
-                    return r[i, "CustNum"].Value;
+            {
+                if (!r[i, "CustNum"].Value.Trim().Equals(trimmed, StringComparison.OrdinalIgnoreCase))
+                    continue;
+                Func<string, string> v = name => r[i, name].IsNull ? null : r[i, name].Value;
+                cfg.CustNum = v("CustNum");
+                cfg.CurrCode = v("CurrCode");
+                cfg.TermsCode = v("TermsCode");
+                cfg.TaxCode1 = v("TaxCode1");
+                cfg.Slsman = v("Slsman");
+                return;
+            }
             throw new InvalidOperationException("Customer '" + trimmed + "' configured for Amazon does not exist in SyteLine.");
         }
 
@@ -371,6 +391,12 @@ namespace HubKor.AmazonSync
 
         // ------------------------------------------------------------------ small utilities
 
+        private static void AddIfSet(Dictionary<string, string> values, string name, string value)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                values[name] = value;
+        }
+
         private static string Q(string value)
         {
             return "N'" + (value ?? "").Replace("'", "''") + "'";
@@ -399,9 +425,16 @@ namespace HubKor.AmazonSync
             return DateTime.TryParse(s, CultureInfo.InvariantCulture, DateTimeStyles.None, out d) ? d : (DateTime?)null;
         }
 
+        private sealed class ItemInfo
+        {
+            public string Item;
+            public string UM;
+        }
+
         private sealed class CoLine
         {
             public string Item;
+            public string UM;
             public decimal Qty;
             public decimal UnitPrice;
         }

@@ -2,7 +2,7 @@ using System;
 
 namespace HubKor.AmazonSync
 {
-    /// <summary>One row of the ue_HK_AmazonConfig table (IDO ue_HK_AmazonConfigs).</summary>
+    /// <summary>One row of the ue_hk_amazon_config table (IDO ue_HK_AmazonConfigs).</summary>
     internal sealed class AmazonConfig
     {
         public string ItemId;            // Mongoose row id, needed to update the row
@@ -25,5 +25,12 @@ namespace HubKor.AmazonSync
 
         public DateTime LastSyncUtc;     // watermark; orders updated after this are fetched
         public int LookbackDays;         // used on the very first run when LastSyncUtc is empty
+
+        // Copied from the customer record at the start of each run. The IDO insert does not
+        // default these the way the Customer Orders form does, and SLCos rejects the row without them.
+        public string CurrCode;
+        public string TermsCode;
+        public string TaxCode1;
+        public string Slsman;
     }
 }

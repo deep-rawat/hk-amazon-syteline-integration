@@ -14,8 +14,8 @@ SyteLine (Mongoose)
  │     2. LWA token → GET /orders/2026-01-01/orders?lastUpdatedAfter=…
  │     3. SKU → Item (Customer Items, then Item = SKU)
  │     4. SLCos insert (CustPo = Amazon order id) + SLCoitems inserts
- │     5. write ue_HK_AmazonOrderLog, move the watermark
- └─ Tables: ue_HK_AmazonConfig, ue_HK_AmazonOrderLog
+ │     5. write ue_hk_amazon_order_log, move the watermark
+ └─ Tables: ue_hk_amazon_config, ue_hk_amazon_order_log
 ```
 
 > **Check with Infor first:** confirm that IDO extension classes in your cloud tenant may make
@@ -36,7 +36,7 @@ SyteLine (Mongoose)
 
 ### 1. Custom tables (Application Schema → Tables)
 
-**ue_HK_AmazonConfig**
+**ue_hk_amazon_config**
 
 | Column | Type | Notes |
 |---|---|---|
@@ -58,7 +58,7 @@ SyteLine (Mongoose)
 | LastSyncUtc | datetime | leave empty for first run |
 | LookbackDays | int | 7 |
 
-**ue_HK_AmazonOrderLog**
+**ue_hk_amazon_order_log**
 
 | Column | Type |
 |---|---|

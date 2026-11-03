@@ -129,7 +129,8 @@ namespace HubKor.AmazonSync
             catch (Exception ex)
             {
                 var cleanup = coNum == null ? "" : TryDeleteCustomerOrder(coNum);
-                return WriteLog(order, status, null, Error, "Creating customer order failed: " + ex.Message + cleanup);
+                return WriteLog(order, status, null, Error, "Creating customer order failed: " + ex.Message + cleanup
+                    + " [cust=" + cfg.CustNum + ", curr=" + cfg.CurrCode + ", terms=" + cfg.TermsCode + ", tax=" + cfg.TaxCode1 + ", slsman=" + cfg.Slsman + "]");
             }
         }
 

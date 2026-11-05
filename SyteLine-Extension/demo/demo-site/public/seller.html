@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Seller Central</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="top">
+  <a class="logo" href="/seller">demo<span>market</span> <span style="font-size:14px;color:#fff;font-weight:400">seller central</span><small></small></a>
+  <span style="margin-left:auto" class="live">Live</span>
+  <a class="hl" href="/buyer"><span>View storefront</span><b>Buyer site</b></a>
+</div>
+<div class="sc">
+  <div class="side">
+    <h4>Orders</h4>
+    <a class="on" data-tab="all">Manage Orders</a>
+    <a data-tab="Unshipped">Unshipped</a>
+    <a data-tab="Shipped">Shipped</a>
+    <h4>Integration</h4>
+    <a data-tab="sync">SyteLine Sync</a>
+  </div>
+  <div class="main">
+    <h1>Manage Orders</h1>
+    <div class="kpis" id="kpis"></div>
+    <div class="flow"><b>Buyer places order</b><i>→</i><b>Seller Central</b><i>→</i><b>Sync Now</b><i>→</i><b>SyteLine customer order</b></div>
+    <div class="tabs" id="tabs"></div>
+    <div class="tw" id="list"></div>
+  </div>
+</div>
+<div class="drawer" id="drawer"></div>
+<div id="toasts"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const usd = (n) => '$' + n.toFixed(2);
+let orders = [], tab = 'all', seen = null, fresh = new Set(), open = null;
+const toast = (t) => { const d = document.createElement('div'); d.className = 'toast'; d.innerHTML = t; $('#toasts').appendChild(d); setTimeout(() => d.remove(), 5000); };
+const synced = (o) => o.fetchedAt ? '<span class="pill g">✓ In SyteLine</span>' : '<span class="pill n">Waiting for sync</span>';
+
+async function load() {
+  orders = await (await fetch('/api/orders')).json();
+  if (seen) orders.forEach((o) => { if (!seen.has(o.orderId)) { fresh.add(o.orderId); toast('🛒 <b>New order</b> ' + o.orderId + ' — ' + usd(o.total)); } });
+  seen = new Set(orders.map((o) => o.orderId));
+  draw();
+  if (open) show(open, true);
+}
+
+function draw() {
+  const un = orders.filter((o) => o.status === 'Unshipped').length, sh = orders.length - un;
+  const rev = orders.reduce((s, o) => s + o.total, 0), sy = orders.filter((o) => o.fetchedAt).length;
+  $('#kpis').innerHTML = [['Total orders', orders.length, ''], ['Unshipped', un, un ? 'warn' : ''], ['Shipped', sh, ''], ['Sales', usd(rev), ''], ['Synced to SyteLine', sy + ' / ' + orders.length, '']]
+    .map((k) => '<div class="kpi ' + k[2] + '"><div class="l">' + k[0] + '</div><div class="v">' + k[1] + '</div></div>').join('');
+  $('#tabs').innerHTML = [['all', 'All orders', orders.length], ['Unshipped', 'Unshipped', un], ['Shipped', 'Shipped', sh]]
+    .map((t) => '<a data-tab="' + t[0] + '" class="' + (tab === t[0] ? 'on' : '') + '">' + t[1] + ' (' + t[2] + ')</a>').join('');
+  document.querySelectorAll('.side a').forEach((a) => a.classList.toggle('on', a.dataset.tab === tab));
+  let list = orders;
+  if (tab === 'Unshipped' || tab === 'Shipped') list = orders.filter((o) => o.status === tab);
+  if (tab === 'sync') list = orders.filter((o) => o.fetchedAt);
+  $('#list').innerHTML = list.length ? '<table class="t"><tr><th>Order date</th><th>Order details</th><th>Items</th><th>Total</th><th>Status</th><th>SyteLine</th><th></th></tr>' +
+    list.map((o) => '<tr class="row ' + (fresh.has(o.orderId) ? 'new' : '') + '" data-open="' + o.orderId + '"><td>' + new Date(o.createdTime).toLocaleString() + '</td>' +
+      '<td><a>' + o.orderId + '</a><br>' + esc(o.buyer.name) + '</td><td>' + o.items.map((i) => i.qty + ' × ' + esc(i.name)).join('<br>') + '</td><td>' + usd(o.total) + '</td>' +
+      '<td><span class="pill ' + (o.status === 'Shipped' ? 'b' : '') + '">' + o.status + '</span></td><td>' + synced(o) + '</td>' +
+      '<td>' + (o.status === 'Unshipped' ? '<button class="btn y" data-ship="' + o.orderId + '">Confirm shipment</button>' : '') + '</td></tr>').join('') + '</table>'
+    : '<div class="card empty" style="border-radius:0">No orders here yet. Place one from the <a href="/buyer">buyer site</a>; it appears here within seconds.</div>';
+}
+
+function show(id, keep) {
+  const o = orders.find((x) => x.orderId === id); if (!o) return;
+  open = id;
+  $('#drawer').innerHTML = '<a data-close style="float:right;font-size:22px;color:var(--mute)">✕</a><h2 class="t">Order ' + o.orderId + '</h2><p>' + synced(o) + ' <span class="pill ' + (o.status === 'Shipped' ? 'b' : '') + '">' + o.status + '</span></p>' +
+    '<b>Buyer</b><p>' + esc(o.buyer.name) + '<br>' + esc(o.buyer.email) + '<br>' + esc(o.buyer.address) + '</p><b>Placed</b><p>' + new Date(o.createdTime).toLocaleString() + '</p>' +
+    '<b>Items</b><table class="t" style="margin:6px 0 12px">' + o.items.map((i) => '<tr><td>' + esc(i.name) + '<br><span class="mute mono">' + i.sku + '</span></td><td>' + i.qty + ' × ' + usd(i.price) + '</td><td><b>' + usd(i.qty * i.price) + '</b></td></tr>').join('') + '</table>' +
+    '<div style="font-size:18px;text-align:right">Total <b>' + usd(o.total) + '</b></div>' +
+    '<p class="mute" style="font-size:12px">' + (o.fetchedAt ? 'Pulled into SyteLine at ' + new Date(o.fetchedAt).toLocaleTimeString() + '. Look for customer PO <span class="mono">' + o.orderId + '</span> in SyteLine.' : 'Not yet pulled by SyteLine. Click Sync Now in SyteLine to import it.') + '</p>' +
+    (o.status === 'Unshipped' ? '<button class="btn y block" data-ship="' + o.orderId + '">Confirm shipment</button>' : '');
+  $('#drawer').classList.add('open');
+}
+
+document.addEventListener('click', async (e) => {
+  const s = e.target.closest('[data-ship]');
+  if (s) { e.stopPropagation(); await fetch('/api/orders/' + s.dataset.ship + '/ship', { method: 'POST' }); toast('📦 Shipment confirmed'); return load(); }
+  if (e.target.closest('[data-close]')) { open = null; $('#drawer').classList.remove('open'); return; }
+  const r = e.target.closest('[data-open]'); if (r) { fresh.delete(r.dataset.open); return show(r.dataset.open); }
+  const t = e.target.closest('[data-tab]'); if (t) { tab = t.dataset.tab; draw(); }
+});
+load();
+setInterval(load, 3000);
+</script>
+</body>
+</html>

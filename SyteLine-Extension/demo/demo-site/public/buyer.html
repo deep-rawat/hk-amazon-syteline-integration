@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>demomarket.com - Shop</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="top">
+  <a class="logo" href="#/">demo<span>market</span><small></small></a>
+  <div class="search"><select id="cat"><option>All</option><option>Widgets</option><option>Gadgets</option></select><input id="q" placeholder="Search demomarket"><button id="go">&#128269;</button></div>
+  <a class="hl" href="#/orders"><span>Returns</span><b>&amp; Orders</b></a>
+  <a class="hl cartbtn" href="#/cart"><span class="n" id="cn">0</span>&#128722; Cart</a>
+  <a class="hl" href="/seller"><span>Are you a seller?</span><b>Seller Central</b></a>
+</div>
+<div class="sub"><a href="#/" class="on">All</a><a href="#/?c=Widgets">Widgets</a><a href="#/?c=Gadgets">Gadgets</a><a href="#/?c=deals">Today's Deals</a><a href="#/orders">Your Orders</a></div>
+<div class="wrap" id="app"></div>
+<div id="toasts"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const usd = (n) => '$' + n.toFixed(2);
+let P = [];
+let cart = JSON.parse(localStorage.getItem('dm_cart') || '{}');
+let mine = JSON.parse(localStorage.getItem('dm_orders') || '[]');
+let buyer = JSON.parse(localStorage.getItem('dm_buyer') || '{"name":"Demo Buyer","email":"buyer@example.com","address":"1 Demo Street, Hyderabad 500081"}');
+const saveCart = () => { localStorage.setItem('dm_cart', JSON.stringify(cart)); $('#cn').textContent = Object.values(cart).reduce((a, b) => a + b, 0); };
+const stars = (r) => '<span class="stars">' + '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r)) + '</span>';
+const priceHtml = (p) => '<span class="price"><sup>$</sup>' + Math.floor(p.price) + '<sup>' + (p.price % 1).toFixed(2).slice(2) + '</sup></span><span class="was">' + usd(p.was) + '</span>';
+const toast = (t) => { const d = document.createElement('div'); d.className = 'toast'; d.innerHTML = t; $('#toasts').appendChild(d); setTimeout(() => d.remove(), 3500); };
+const pimg = (p) => '<div class="pimg" style="background:linear-gradient(135deg,' + p.color + '22,' + p.color + '66)">' + (p.badge ? '<span class="badge">' + p.badge + '</span>' : '') + p.emoji + '</div>';
+const add = (sku, n) => { cart[sku] = Math.max(0, (cart[sku] || 0) + (n || 1)); if (!cart[sku]) delete cart[sku]; saveCart(); };
+const total = () => P.reduce((s, p) => s + (cart[p.sku] || 0) * p.price, 0);
+
+function home(q) {
+  const c = q.get('c'), term = ($('#q').value || '').toLowerCase();
+  const list = P.filter((p) => (!c || c === 'deals' || p.category === c) && (!term || (p.name + p.blurb).toLowerCase().includes(term)));
+  $('#app').innerHTML = '<div class="hero"><h1>Great deals, delivered.</h1><p>Widgets and gadgets from our marketplace sellers.</p><div><a class="btn y" style="color:#111;display:inline-block" href="#/p/DEMO-003">Shop today\'s deal</a></div></div>' +
+    '<div class="cards">' + (list.map((p) => '<div class="card pcard" data-go="#/p/' + p.sku + '">' + pimg(p) +
+      '<h3 class="ptitle">' + esc(p.name) + '</h3><div>' + stars(p.rating) + '<i style="color:var(--link);font-size:12px"> ' + p.reviews.toLocaleString() + '</i></div>' +
+      '<div>' + priceHtml(p) + '</div><div class="save">Save ' + usd(p.was - p.price) + '</div><div class="prime">✓prime <span class="mute" style="font-style:normal;font-weight:400">FREE delivery</span></div>' +
+      '<button class="btn y block" data-add="' + p.sku + '">Add to cart</button></div>').join('') || '<div class="card empty">No results.</div>') + '</div>';
+}
+
+function product(sku) {
+  const p = P.find((x) => x.sku === sku); if (!p) return home(new URLSearchParams());
+  $('#app').innerHTML = '<div class="crumb">‹ <a href="#/">Back to results</a> | ' + p.category + '</div><div class="card detail"><div>' + pimg(p) + '</div>' +
+    '<div><h2 class="t">' + esc(p.name) + '</h2><div>' + stars(p.rating) + ' <a>' + p.reviews.toLocaleString() + ' ratings</a></div><hr style="border:0;border-top:1px solid var(--line)">' +
+    '<div><span style="color:var(--red);font-size:22px">-' + Math.round((1 - p.price / p.was) * 100) + '%</span> ' + priceHtml(p) + '</div><p class="mute">SKU: ' + p.sku + '</p><b>About this item</b><ul>' + p.bullets.map((b) => '<li>' + b + '</li>').join('') + '</ul></div>' +
+    '<div class="buybox"><div class="price">' + usd(p.price) + '</div><div class="prime">✓prime FREE delivery</div><p style="color:var(--green);font-size:18px;margin:8px 0">In Stock</p>' +
+    '<button class="btn y block" data-add="' + p.sku + '">Add to Cart</button><button class="btn o block" data-buy="' + p.sku + '">Buy Now</button><p class="mute" style="font-size:12px">Ships from and sold by demomarket sellers</p></div></div>';
+}
+
+function cartView() {
+  const rows = P.filter((p) => cart[p.sku]);
+  if (!rows.length) { $('#app').innerHTML = '<div class="card empty"><h2 class="t">Your cart is empty</h2><a href="#/">Continue shopping</a></div>'; return; }
+  const n = Object.values(cart).reduce((a, b) => a + b, 0);
+  $('#app').innerHTML = '<div class="two"><div class="card"><h2 class="t">Shopping Cart</h2><div class="mute" style="text-align:right">Price</div>' +
+    rows.map((p) => '<div class="crow">' + pimg(p).replace('class="pimg"', 'class="pimg"') + '<div style="flex:1"><a href="#/p/' + p.sku + '" style="font-size:17px">' + esc(p.name) + '</a><div style="color:var(--green);font-size:12px">In Stock</div><div class="prime">✓prime</div>' +
+      '<div style="margin-top:8px"><span class="qty"><button data-add="' + p.sku + '" data-n="-1">−</button><b>' + cart[p.sku] + '</b><button data-add="' + p.sku + '" data-n="1">+</button></span> <a data-del="' + p.sku + '" style="margin-left:10px">Delete</a></div></div><b>' + usd(p.price * cart[p.sku]) + '</b></div>').join('') +
+    '<div style="text-align:right;font-size:18px;padding-top:10px">Subtotal (' + n + ' item' + (n > 1 ? 's' : '') + '): <b>' + usd(total()) + '</b></div></div>' +
+    '<div class="card"><div style="color:var(--green);font-size:13px">✓ Your order qualifies for FREE delivery.</div><div style="font-size:18px;margin:8px 0">Subtotal (' + n + ' items): <b>' + usd(total()) + '</b></div><a class="btn y block" style="color:#111" href="#/checkout">Proceed to checkout</a></div></div>';
+}
+
+function checkout() {
+  if (!Object.keys(cart).length) { location.hash = '#/cart'; return; }
+  const rows = P.filter((p) => cart[p.sku]);
+  $('#app').innerHTML = '<div class="steps"><span class="on">1 Address</span><span class="on">2 Payment</span><span>3 Review</span></div><div class="two"><div class="card"><h2 class="t">Checkout</h2>' +
+    '<label class="lbl">Full name</label><input class="inp" id="bn" value="' + esc(buyer.name) + '"><label class="lbl">Email</label><input class="inp" id="be" value="' + esc(buyer.email) + '">' +
+    '<label class="lbl">Delivery address</label><textarea class="inp" id="ba" rows="2">' + esc(buyer.address) + '</textarea>' +
+    '<label class="lbl">Payment method</label><div class="inp" style="background:#f7fafa">💳 Visa ending in 4242 (demo)</div>' +
+    '<h3 style="margin-top:18px">Review items</h3>' + rows.map((p) => '<div class="line" style="display:flex;justify-content:space-between;padding:4px 0">' + cart[p.sku] + ' × ' + esc(p.name) + '<span>' + usd(p.price * cart[p.sku]) + '</span></div>').join('') + '</div>' +
+    '<div class="card"><button class="btn y block" id="place" style="margin:0">Place your order</button><p class="mute" style="font-size:12px">By placing your order you agree to the demo terms.</p><hr style="border:0;border-top:1px solid var(--line)">' +
+    '<div style="display:flex;justify-content:space-between"><span>Items:</span><span>' + usd(total()) + '</span></div><div style="display:flex;justify-content:space-between"><span>Delivery:</span><span>FREE</span></div>' +
+    '<div style="display:flex;justify-content:space-between;color:var(--red);font-size:18px;font-weight:700;margin-top:6px"><span>Order total:</span><span>' + usd(total()) + '</span></div></div></div>';
+}
+
+async function place(btn) {
+  buyer = { name: $('#bn').value, email: $('#be').value, address: $('#ba').value };
+  localStorage.setItem('dm_buyer', JSON.stringify(buyer));
+  btn.disabled = true; btn.textContent = 'Placing order…';
+  const items = Object.entries(cart).map((e) => ({ sku: e[0], qty: e[1] }));
+  const r = await fetch('/api/orders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...buyer, items }) });
+  const o = await r.json();
+  if (!r.ok) { toast(esc(o.error || 'Order failed')); btn.disabled = false; btn.textContent = 'Place your order'; return; }
+  mine.unshift(o.orderId); localStorage.setItem('dm_orders', JSON.stringify(mine));
+  cart = {}; saveCart();
+  location.hash = '#/done/' + o.orderId;
+}
+
+async function done(id) {
+  const o = await (await fetch('/api/orders/' + id)).json();
+  $('#app').innerHTML = '<div class="card confirm"><div class="tick">✓</div><h2 class="t">Order placed, thank you!</h2><p>Confirmation sent to <b>' + esc(o.buyer.email) + '</b></p>' +
+    '<p>Order number <b class="mono">' + o.orderId + '</b> · Total <b>' + usd(o.total) + '</b></p><p class="mute">The seller can see this order right now on Seller Central.</p>' +
+    '<a class="btn y" style="color:#111;display:inline-block" href="#/orders">Review your orders</a> <a class="btn w" style="display:inline-block" href="#/">Continue shopping</a></div>';
+}
+
+async function orders() {
+  const all = await (await fetch('/api/orders')).json();
+  const list = all.filter((o) => mine.includes(o.orderId));
+  $('#app').innerHTML = '<h2 class="t">Your Orders</h2>' + (list.map((o) => {
+    const sh = o.status === 'Shipped';
+    return '<div class="card" style="margin-bottom:12px"><div style="display:flex;gap:30px;flex-wrap:wrap;background:#f0f2f2;margin:-16px -16px 12px;padding:12px 16px;border-radius:6px 6px 0 0;font-size:12px;color:var(--mute)">' +
+      '<div>ORDER PLACED<br><b style="color:var(--ink)">' + new Date(o.createdTime).toLocaleString() + '</b></div><div>TOTAL<br><b style="color:var(--ink)">' + usd(o.total) + '</b></div><div>SHIP TO<br><b style="color:var(--ink)">' + esc(o.buyer.name) + '</b></div><div style="margin-left:auto">ORDER # <span class="mono">' + o.orderId + '</span></div></div>' +
+      '<h3 style="margin:0;color:' + (sh ? 'var(--green)' : 'var(--ink)') + '">' + (sh ? 'Shipped, on its way' : 'Preparing for shipment') + '</h3>' +
+      '<div class="track"><div class="done">Ordered</div><div class="' + (sh ? 'done' : '') + '">Shipped</div><div>Out for delivery</div><div>Delivered</div></div>' +
+      o.items.map((i) => '<div style="padding:4px 0">' + i.qty + ' × <a href="#/p/' + i.sku + '">' + esc(i.name) + '</a></div>').join('') + '</div>';
+  }).join('') || '<div class="card empty">No orders yet. <a href="#/">Start shopping</a></div>');
+}
+
+async function route() {
+  const h = location.hash.replace(/^#/, '') || '/';
+  const [path, qs] = h.split('?'); const parts = path.split('/').filter(Boolean);
+  document.querySelectorAll('.sub a').forEach((a) => a.classList.toggle('on', a.getAttribute('href') === '#' + h));
+  scrollTo(0, 0);
+  if (!parts.length) return home(new URLSearchParams(qs || ''));
+  if (parts[0] === 'p') return product(parts[1]);
+  if (parts[0] === 'cart') return cartView();
+  if (parts[0] === 'checkout') return checkout();
+  if (parts[0] === 'done') return done(parts[1]);
+  if (parts[0] === 'orders') return orders();
+  home(new URLSearchParams());
+}
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('[data-add]');
+  if (a) { e.stopPropagation(); add(a.dataset.add, Number(a.dataset.n || 1)); if (location.hash.startsWith('#/cart')) cartView(); else toast('✓ Added to cart'); return; }
+  const b = e.target.closest('[data-buy]'); if (b) { add(b.dataset.buy, 1); location.hash = '#/checkout'; return; }
+  const d = e.target.closest('[data-del]'); if (d) { delete cart[d.dataset.del]; saveCart(); cartView(); return; }
+  if (e.target.id === 'place') return place(e.target);
+  const g = e.target.closest('[data-go]'); if (g) location.hash = g.dataset.go;
+});
+$('#go').onclick = () => { location.hash = '#/'; route(); };
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#go').click(); });
+window.addEventListener('hashchange', route);
+fetch('/api/products').then((r) => r.json()).then((p) => { P = p; saveCart(); route(); });
+</script>
+</body>
+</html>

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: sp-api-sandbox
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /
+    envVars:
+      - key: DB_MODE
+        value: memory

@@ -7,4 +7,6 @@ services:
     healthCheckPath: /
     envVars:
       - key: DB_MODE
-        value: memory
+        value: persistent
+      - key: DB_FILE_PATH
+        value: /app/seed/sandbox.db

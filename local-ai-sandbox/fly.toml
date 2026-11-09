@@ -6,7 +6,8 @@ primary_region = "iad"
 
 [env]
   PORT = "8080"
-  DB_MODE = "memory"
+  DB_MODE = "persistent"
+  DB_FILE_PATH = "/app/seed/sandbox.db"
 
 [http_service]
   internal_port = 8080

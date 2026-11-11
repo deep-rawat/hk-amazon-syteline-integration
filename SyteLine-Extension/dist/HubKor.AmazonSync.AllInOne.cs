@@ -77,6 +77,8 @@ namespace HubKor.AmazonSync
                 // Amazon does not guarantee any order, so fetch the whole window and sort it oldest-update first;
                 // that makes "continue after the last one handled" safe.
                 var orders = run.Client.SearchOrders(since);
+                // Some servers (including the mock server) ignore the lastUpdatedAfter filter, so apply it here too.
+                orders.RemoveAll(o => UpdatedUtc(o) <= since);
                 orders.Sort((a, b) => UpdatedUtc(a).CompareTo(UpdatedUtc(b)));
                 var more = MaxOrdersPerRun > 0 && orders.Count > MaxOrdersPerRun;
                 if (more)
@@ -93,9 +95,9 @@ namespace HubKor.AmazonSync
                 // Only move the watermark forward when everything worked, so failed orders are
                 // fetched again next time. Orders already staged are skipped (and logged) on a re-fetch.
                 // If the per-run limit cut the list short, continue from the newest order handled
-                // (one second back, in case another order shares its timestamp) instead of jumping to now.
+                // instead of jumping to now (orders are fetched strictly after this time).
                 if (run.Errors == 0)
-                    cfg.LastSyncUtc = more ? newestUpdate.AddSeconds(-1) : runStartUtc.AddMinutes(-5);
+                    cfg.LastSyncUtc = more ? newestUpdate : runStartUtc.AddMinutes(-5);
                 SaveConfigProgress(cfg);
 
                 Infobar = string.Format("Amazon sync finished: {0} orders staged, {1} skipped, {2} errors, {3} warnings; {4} payments recorded.",

@@ -23,6 +23,7 @@ namespace HubKor.AmazonSync
         private const string LwaTokenUrl = "https://api.amazon.com/auth/o2/token";
         private const string UserAgent = "HubKorAmazonSync/1.0 (Language=CSharp; Platform=InforMongoose)";
         private const string OrdersPath = "/orders/2026-01-01/orders";
+        private const string TransactionsPath = "/finances/2024-06-19/transactions";
         private const int MaxPages = 50;
         private const int MaxRetries = 3;
 
@@ -58,7 +59,7 @@ namespace HubKor.AmazonSync
                 var query = new StringBuilder();
                 query.Append("marketplaceIds=").Append(Uri.EscapeDataString(_cfg.MarketplaceId));
                 query.Append("&lastUpdatedAfter=").Append(Uri.EscapeDataString(lastUpdatedAfterUtc.ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)));
-                query.Append("&includedData=FULFILLMENT,PROCEEDS");
+                query.Append("&includedData=FULFILLMENT,PROCEEDS,BUYER,RECIPIENT");
                 query.Append("&maxResultsPerPage=100");
                 if (!string.IsNullOrWhiteSpace(_cfg.FulfilledBy))
                     query.Append("&fulfilledBy=").Append(Uri.EscapeDataString(_cfg.FulfilledBy));
@@ -73,6 +74,13 @@ namespace HubKor.AmazonSync
                     break;
             }
             return orders;
+        }
+
+        /// <summary>Finances API v2024-06-19: all transactions (payments, fees) posted against one order.</summary>
+        public List<Dictionary<string, object>> GetOrderTransactions(string orderId)
+        {
+            var page = Get(TransactionsPath + "?relatedIdentifierName=ORDER_ID&relatedIdentifierValue=" + Uri.EscapeDataString(orderId));
+            return Json.Array(page, "payload.transactions");
         }
 
         private Dictionary<string, object> Get(string pathAndQuery)

@@ -32,5 +32,17 @@ namespace HubKor.AmazonSync
         public string TermsCode;
         public string TaxCode1;
         public string Slsman;
+
+        // Customer details used to fill the HubKor staged order when Amazon sends no recipient data.
+        public string CustName;
+        public string Addr1;
+        public string City;
+        public string State;
+        public string Zip;
+        public string Country;
+        public string ShipCode;
+        public string EndUserType;
+        public string BankCode;
+        public string BillToId;          // customer's Shopify BillTo ID; HubKor matches the staged order to the customer by it
     }
 }

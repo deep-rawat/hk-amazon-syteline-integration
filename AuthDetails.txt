@@ -1,0 +1,7 @@
+curl --location 'https://mingle-sso.inforcloudsuite.com/QUADKOR_AX1/as/token.oauth2' \
+--header 'Content-Type: application/x-www-form-urlencoded' \
+--data-urlencode 'client_id=QUADKOR_AX1~AQ_E-2opyz0i4XVpEWQRNZNghE8KzffP4w0pdVXoF0U' \
+--data-urlencode 'client_secret=rbxXGtYqcVlsalpJiYSDoN1m6wu4XrcOermK6kqC4NrGaZZJ2dyWPjrVk45x3tHc9iC2ydEOEECt5X8JPpf82g' \
+--data-urlencode 'username=QUADKOR_AX1#G9GcHCvvljHxe-Q1-3H1a4SeGQCmwn6rVFvB5n1XWlLJRKaS3J_tBtS8jtPuiArhLS-lmyhdKCy6CFDFxDugFw' \
+--data-urlencode 'password=V0xat88pIZ7uqSsW2D-Ph9Kf8n6D8wPnfoefHD9ydjhGtA9PfUYllxy0-irCqUpoSxIYXdja9dTmolBAU8OBQQ' \
+--data-urlencode 'grant_type=password'

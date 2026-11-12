@@ -21,7 +21,8 @@ namespace HubKor.AmazonSync
     /// in a run gets a new row in the ue_HK_AmazonIntegrationLogs IDO.
     ///
     /// Methods exposed to Mongoose:
-    ///   ue_HK_SyncAmazonOrders(ConfigId, ref Infobar)   - full sync run (form button + scheduled task)
+    ///   ue_HK_SyncAmazonOrders(ConfigId, ref Infobar)   - full sync run (scheduled task)
+    ///   ue_HK_SyncAmazonOrdersNow(ref Infobar)          - same, DEFAULT config (form button)
     /// </summary>
     [IDOExtensionClass("ue_HK_AmazonConfigs")]
     public class AmazonSyncExt : IDOExtensionClass
@@ -68,6 +69,16 @@ namespace HubKor.AmazonSync
         private DateTime _traceStartUtc;
 
         private readonly Dictionary<string, ItemInfo> _itemCache = new Dictionary<string, ItemInfo>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>
+        /// Form button entry point: no input parameters, always uses the DEFAULT config.
+        /// The only parameter is the output message, so the form needs no parameter mapping.
+        /// </summary>
+        [IDOMethod(MethodFlags.None, "Infobar")]
+        public int ue_HK_SyncAmazonOrdersNow(ref string Infobar)
+        {
+            return ue_HK_SyncAmazonOrders("DEFAULT", ref Infobar);
+        }
 
         [IDOMethod(MethodFlags.None, "Infobar")]
         public int ue_HK_SyncAmazonOrders(string ConfigId, ref string Infobar)

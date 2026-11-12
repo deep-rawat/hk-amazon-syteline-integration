@@ -53,21 +53,40 @@ namespace HubKor.AmazonSync
         private const string Skipped = "Skipped";
         private const string Warning = "Warning";
 
+        // Step-by-step tracing for debugging: when true, every major step writes a "Trace" row to the log table.
+        // Set to false once the form button / sync is confirmed working.
+        private const bool TraceEnabled = true;
+        private const string TraceRecord = "Trace";
+        private const string TraceStatus = "Info";
+
         // Log record types
         private const string OrderRecord = "Order";
         private const string PaymentRecord = "Payment";
+
+        private string _traceRunId;
+        private string _traceConfigId;
+        private DateTime _traceStartUtc;
 
         private readonly Dictionary<string, ItemInfo> _itemCache = new Dictionary<string, ItemInfo>(StringComparer.OrdinalIgnoreCase);
 
         [IDOMethod(MethodFlags.None, "Infobar")]
         public int ue_HK_SyncAmazonOrders(string ConfigId, ref string Infobar)
         {
+            _traceRunId = Guid.NewGuid().ToString();
+            _traceStartUtc = DateTime.UtcNow;
+            _traceConfigId = null;
+            Trace("01 entry", "ue_HK_SyncAmazonOrders called. ConfigId parameter = '" + (ConfigId ?? "(null)") + "'.");
             try
             {
                 var cfg = LoadConfig(string.IsNullOrWhiteSpace(ConfigId) ? "DEFAULT" : ConfigId);
+                _traceConfigId = cfg.ConfigId;
+                Trace("02 config loaded", "BaseUrl=" + cfg.BaseUrl + "; ClientId set=" + !string.IsNullOrWhiteSpace(cfg.ClientId)
+                    + "; LastSyncUtc=" + cfg.LastSyncUtc.ToString("u", CultureInfo.InvariantCulture) + "; LookbackDays=" + cfg.LookbackDays
+                    + "; CustNum=" + cfg.CustNum + "; Whse=" + cfg.Whse + "; NextCoSeq=" + cfg.NextCoSeq + "; MaxOrdersPerRun=" + MaxOrdersPerRun);
                 LoadCustomer(cfg);
+                Trace("03 customer loaded", "Customer " + cfg.CustNum + " name='" + cfg.CustName + "', BillToId=" + cfg.BillToId + ", TermsCode=" + cfg.TermsCode + ", CurrCode=" + cfg.CurrCode);
 
-                var runId = Guid.NewGuid().ToString();
+                var runId = _traceRunId;
                 var runStartUtc = DateTime.UtcNow;
                 var since = cfg.LastSyncUtc == DateTime.MinValue
                     ? runStartUtc.AddDays(-Math.Max(1, cfg.LookbackDays))
@@ -76,13 +95,17 @@ namespace HubKor.AmazonSync
                 var run = new RunState { RunId = runId, Client = new AmazonSpApiClient(cfg) };
                 // Amazon does not guarantee any order, so fetch the whole window and sort it oldest-update first;
                 // that makes "continue after the last one handled" safe.
+                Trace("04 fetching orders", "GET " + cfg.BaseUrl + " orders updated after " + since.ToString("u", CultureInfo.InvariantCulture));
                 var orders = run.Client.SearchOrders(since);
+                Trace("05 orders fetched", orders.Count + " order(s) returned by the API (before our own date filter).");
                 // Some servers (including the mock server) ignore the lastUpdatedAfter filter, so apply it here too.
                 orders.RemoveAll(o => UpdatedUtc(o) <= since);
                 orders.Sort((a, b) => UpdatedUtc(a).CompareTo(UpdatedUtc(b)));
+                Trace("06 orders filtered", orders.Count + " order(s) updated after the watermark.");
                 var more = MaxOrdersPerRun > 0 && orders.Count > MaxOrdersPerRun;
                 if (more)
                     orders.RemoveRange(MaxOrdersPerRun, orders.Count - MaxOrdersPerRun);
+                Trace("07 batch selected", orders.Count + " order(s) will be processed now; more waiting=" + more + ".");
 
                 var newestUpdate = DateTime.MinValue;
                 foreach (var order in orders)
@@ -99,15 +122,18 @@ namespace HubKor.AmazonSync
                 if (run.Errors == 0)
                     cfg.LastSyncUtc = more ? newestUpdate : runStartUtc.AddMinutes(-5);
                 SaveConfigProgress(cfg);
+                Trace("08 watermark saved", "LastSyncUtc is now " + cfg.LastSyncUtc.ToString("u", CultureInfo.InvariantCulture) + ".");
 
                 Infobar = string.Format("Amazon sync finished: {0} orders staged, {1} skipped, {2} errors, {3} warnings; {4} payments recorded.",
                     run.Staged, run.Skipped, run.Errors, run.Warnings, run.PaymentsRecorded)
                     + (more ? " Limit of " + MaxOrdersPerRun + " orders per run reached; click Sync Now again for the next batch." : "");
+                Trace("09 finished", Infobar);
                 return run.Errors == 0 ? 0 : 16;
             }
             catch (Exception ex)
             {
                 Infobar = "Amazon sync failed: " + ex.Message;
+                Trace("99 FAILED", ex.ToString());
                 return 16;
             }
         }
@@ -122,10 +148,12 @@ namespace HubKor.AmazonSync
 
             try
             {
+                Trace("order", "Processing " + orderId + " (updated " + Json.Str(order, "lastUpdatedTime") + ", status " + Json.Str(order, "fulfillment.fulfillmentStatus") + ").");
                 ProcessOrderCore(order, orderId, cfg, run);
             }
             catch (Exception ex)
             {
+                Trace("order FAILED", orderId + ": " + ex);
                 run.Count(LogOrder(run, cfg, order, null, Error, "Unexpected error: " + ex.Message));
             }
         }
@@ -648,6 +676,34 @@ namespace HubKor.AmazonSync
                 values["RawJson"] = Json.Serialize(raw);
             Insert(LogIdo, values);
             return status;
+        }
+
+        // ------------------------------------------------------------------ tracing
+
+        /// <summary>Writes one debug row (RecordType Trace) to the log table. Never throws, so it cannot break the sync.</summary>
+        private void Trace(string step, string message)
+        {
+            if (!TraceEnabled)
+                return;
+            try
+            {
+                var elapsed = (int)(DateTime.UtcNow - _traceStartUtc).TotalMilliseconds;
+                var values = new Dictionary<string, string>
+                {
+                    { "LogId", Guid.NewGuid().ToString() },
+                    { "RunId", _traceRunId ?? Guid.NewGuid().ToString() },
+                    { "RecordType", TraceRecord },
+                    { "Status", TraceStatus },
+                    { "Message", Trunc("[" + step + " +" + elapsed + "ms] " + (message ?? ""), 1000) },
+                    { "CreatedAt", DateTime.UtcNow.ToString(IdoDateFormat, CultureInfo.InvariantCulture) },
+                };
+                AddIfSet(values, "ConfigId", _traceConfigId);
+                Insert(LogIdo, values);
+            }
+            catch (Exception)
+            {
+                // tracing must never stop the sync
+            }
         }
 
         // ------------------------------------------------------------------ IDO helpers

@@ -48,6 +48,17 @@ namespace HubKor.AmazonSync
         private const string DefaultEndUserType = "RETDSL";
         private const string DefaultBankCode = "BK1";
 
+        // Static Bill To / Ship To details written on every staged Amazon order (POC demo).
+        private const string DemoName = "Amazon Test";
+        private const string DemoAddr1 = "123 William St";
+        private const string DemoAddr2 = "Suite 100";
+        private const string DemoCity = "East Peoria";
+        private const string DemoState = "IL";
+        private const string DemoZip = "61611";
+        private const string DemoCountry = "UNITED STATES";
+        private const string DemoPhone = "3095550101";
+        private const string DemoEmail = "amazon.test@example.com";
+
         // Log statuses
         private const string Synced = "Synced";
         private const string Error = "Error";
@@ -379,15 +390,14 @@ namespace HubKor.AmazonSync
             if (payment != null)
                 payment.OrderTotal = grandTotal;
 
-            // Recipient details if Amazon sent them (BUYER/RECIPIENT data), otherwise the marketplace customer's own.
-            Func<string, string> recip = name => Json.Str(order, "recipient.deliveryAddress." + name);
-            var name1 = Trunc(recip("name") ?? cfg.CustName ?? "Amazon Customer", 60);
-            var addr1 = Trunc(recip("addressLine1") ?? cfg.Addr1 ?? "Address not provided by Amazon", 50);
-            var city = Trunc(recip("city") ?? cfg.City ?? "", 30);
-            var state = Trunc(recip("stateOrRegion") ?? cfg.State ?? "", 5);
-            var zip = Trunc(recip("postalCode") ?? cfg.Zip ?? "", 10);
-            var country = Trunc(CountryName(recip("countryCode")) ?? cfg.Country ?? "UNITED STATES", 30);
-            var email = Trunc(Json.Str(order, "buyer.buyerEmail") ?? "", 50);
+            // POC demo: Bill To and Ship To always get the same static details (see the Demo* constants).
+            var name1 = DemoName;
+            var addr1 = DemoAddr1;
+            var city = DemoCity;
+            var state = DemoState;
+            var zip = DemoZip;
+            var country = DemoCountry;
+            var email = DemoEmail;
             var currency = Json.Str(order, "proceeds.grandTotal.currencyCode") ?? cfg.CurrCode ?? "USD";
 
             var header = new Dictionary<string, string>
@@ -439,6 +449,12 @@ namespace HubKor.AmazonSync
             AddIfSet(header, "FrtTaxCode1", cfg.TaxCode1);
             AddIfSet(header, "MscTaxCode1", cfg.TaxCode1);
             AddIfSet(header, "Slsman", cfg.Slsman);
+            // Address 2 and Phone: property names not confirmed on ue_hk_co_msts, so each is
+            // written only if the IDO has that property (first match wins).
+            AddIfProperty(header, StageHeaderIdo, DemoAddr2, "bill_to_addr2", "bill_to_address2");
+            AddIfProperty(header, StageHeaderIdo, DemoAddr2, "ship_to_addr2", "ship_to_address2");
+            AddIfProperty(header, StageHeaderIdo, DemoPhone, "bill_to_phone", "phone", "Phone");
+            AddIfProperty(header, StageHeaderIdo, DemoPhone, "ship_to_phone");
             if (payment != null)
                 foreach (var pair in PaymentValues(coNum, payment))
                     header[pair.Key] = pair.Value;
@@ -756,6 +772,41 @@ namespace HubKor.AmazonSync
         }
 
         // ------------------------------------------------------------------ small utilities
+
+        private readonly Dictionary<string, bool> _propertyExists = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>True if the IDO has this property. A load of an unknown property throws, so test it once and cache.</summary>
+        private bool HasProperty(string ido, string property)
+        {
+            var key = ido + "." + property;
+            bool exists;
+            if (_propertyExists.TryGetValue(key, out exists))
+                return exists;
+            try
+            {
+                Load(ido, property, "1 = 0", 1);
+                exists = true;
+            }
+            catch (Exception)
+            {
+                exists = false;
+            }
+            _propertyExists[key] = exists;
+            return exists;
+        }
+
+        /// <summary>Sets the value on the first candidate property the IDO actually has; does nothing if none exist.</summary>
+        private void AddIfProperty(Dictionary<string, string> values, string ido, string value, params string[] candidates)
+        {
+            foreach (var name in candidates)
+            {
+                if (HasProperty(ido, name))
+                {
+                    values[name] = value;
+                    return;
+                }
+            }
+        }
 
         private static void AddIfSet(Dictionary<string, string> values, string name, string value)
         {

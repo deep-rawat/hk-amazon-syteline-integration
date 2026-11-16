@@ -38,8 +38,10 @@ namespace HubKor.AmazonSync
         private const string TakenBy = "AZ";
         private const string DefaultShipCode = "FXG";
         private const string DefaultShipDescription = "FedEx Ground";
-        private const string DefaultEndUserType = "RETDSL";
+        private const string DefaultEndUserType = "56TG";   // must exist in End User Types; RETDSL does not
         private const string DefaultBankCode = "BK1";
+        private const string DefaultInvCategory = "DEFAULTCATEGORY";
+        private const string DefaultTermsCode = "NT";   // No Terms
 
         // Static Bill To / Ship To details written on every staged Amazon order (POC demo).
         private const string DemoName = "Amazon Test";
@@ -405,8 +407,9 @@ namespace HubKor.AmazonSync
                 { "Whse", cfg.Whse },
                 { "ShipCode", cfg.ShipCode ?? DefaultShipCode },
                 { "shipdescription", DefaultShipDescription },
-                { "EndUserType", cfg.EndUserType ?? DefaultEndUserType },
+                { "EndUserType", DefaultEndUserType },
                 { "bank_code", cfg.BankCode ?? DefaultBankCode },
+                { "invcategory", DefaultInvCategory },
                 { "currency", currency },
                 { "ExchRate", "1" },
                 { "DiscountType", "P" },
@@ -437,17 +440,17 @@ namespace HubKor.AmazonSync
                 { "ship_to_country", country },
             };
             AddIfSet(header, "email", email);
-            AddIfSet(header, "TermsCode", cfg.TermsCode);
+            header["TermsCode"] = DefaultTermsCode;
             AddIfSet(header, "TaxCode1", cfg.TaxCode1);
             AddIfSet(header, "FrtTaxCode1", cfg.TaxCode1);
             AddIfSet(header, "MscTaxCode1", cfg.TaxCode1);
-            AddIfSet(header, "Slsman", cfg.Slsman);
-            // Address 2 and Phone: property names not confirmed on ue_hk_co_msts, so each is
-            // written only if the IDO has that property (first match wins).
-            AddIfProperty(header, StageHeaderIdo, DemoAddr2, "bill_to_addr2", "bill_to_address2");
-            AddIfProperty(header, StageHeaderIdo, DemoAddr2, "ship_to_addr2", "ship_to_address2");
-            AddIfProperty(header, StageHeaderIdo, DemoPhone, "bill_to_phone", "phone", "Phone");
-            AddIfProperty(header, StageHeaderIdo, DemoPhone, "ship_to_phone");
+            // Salesperson (Slsman) is intentionally left blank on Amazon orders.
+            // The address boxes at the bottom of the Bill To / Ship To tabs (FormattBillTo / FormatShipTo)
+            // are read from the SyteLine customer address of CustNum/CustSeq, so they cannot be set here.
+            header["bill_to_addr2"] = DemoAddr2;
+            header["ship_to_addr2"] = DemoAddr2;
+            header["Phone"] = DemoPhone;        // Bill To tab
+            header["ShipPhone"] = DemoPhone;    // Ship To tab
             if (payment != null)
                 foreach (var pair in PaymentValues(coNum, payment))
                     header[pair.Key] = pair.Value;
@@ -765,41 +768,6 @@ namespace HubKor.AmazonSync
         }
 
         // ------------------------------------------------------------------ small utilities
-
-        private readonly Dictionary<string, bool> _propertyExists = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-
-        /// <summary>True if the IDO has this property. A load of an unknown property throws, so test it once and cache.</summary>
-        private bool HasProperty(string ido, string property)
-        {
-            var key = ido + "." + property;
-            bool exists;
-            if (_propertyExists.TryGetValue(key, out exists))
-                return exists;
-            try
-            {
-                Load(ido, property, "1 = 0", 1);
-                exists = true;
-            }
-            catch (Exception)
-            {
-                exists = false;
-            }
-            _propertyExists[key] = exists;
-            return exists;
-        }
-
-        /// <summary>Sets the value on the first candidate property the IDO actually has; does nothing if none exist.</summary>
-        private void AddIfProperty(Dictionary<string, string> values, string ido, string value, params string[] candidates)
-        {
-            foreach (var name in candidates)
-            {
-                if (HasProperty(ido, name))
-                {
-                    values[name] = value;
-                    return;
-                }
-            }
-        }
 
         private static void AddIfSet(Dictionary<string, string> values, string name, string value)
         {

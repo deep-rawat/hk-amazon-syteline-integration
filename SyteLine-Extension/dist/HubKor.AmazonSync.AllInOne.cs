@@ -337,8 +337,8 @@ namespace HubKor.AmazonSync
                 return;
 
             var net = Json.Dec(txn, "totalAmount.amount");
-            var gross = payment.Transactions.Count == 1 && payment.OrderTotal > 0m ? payment.OrderTotal : net;
-            var fee = gross > net ? gross - net : 0m;
+            var fee = FeeShare(payment, txn);
+            var gross = net + fee;
             var currency = Json.Str(txn, "totalAmount.currencyCode") ?? cfg.CurrCode ?? "USD";
             var posted = ParseUtc(Json.Str(txn, "postedDate")) ?? DateTime.UtcNow;
             var inv = CultureInfo.InvariantCulture;
@@ -531,6 +531,42 @@ namespace HubKor.AmazonSync
                 total += Json.Dec(txn, "totalAmount.amount");
             }
             return released.Count == 0 ? null : new PaymentInfo { Total = total, Transactions = released };
+        }
+
+        /// <summary>
+        /// This transaction's part of the Amazon fee. The order's total fee is order total minus everything Amazon
+        /// paid; it is split over the positive transactions in proportion to their amounts, and the last one
+        /// takes the rounding difference, so the fees on all rows add up exactly.
+        /// </summary>
+        private static decimal FeeShare(PaymentInfo payment, Dictionary<string, object> txn)
+        {
+            var totalFee = payment.OrderTotal - payment.Total;
+            var net = Json.Dec(txn, "totalAmount.amount");
+            if (totalFee <= 0m || net <= 0m)
+                return 0m;
+
+            var positive = new List<Dictionary<string, object>>();
+            var positiveTotal = 0m;
+            foreach (var t in payment.Transactions)
+            {
+                var amount = Json.Dec(t, "totalAmount.amount");
+                if (amount <= 0m)
+                    continue;
+                positive.Add(t);
+                positiveTotal += amount;
+            }
+
+            var allocated = 0m;
+            foreach (var t in positive)
+            {
+                if (ReferenceEquals(t, positive[positive.Count - 1]))
+                    return ReferenceEquals(t, txn) ? totalFee - allocated : 0m;
+                var share = Math.Round(totalFee * Json.Dec(t, "totalAmount.amount") / positiveTotal, 2, MidpointRounding.AwayFromZero);
+                if (ReferenceEquals(t, txn))
+                    return share;
+                allocated += share;
+            }
+            return 0m;
         }
 
         private static string FinancialGroupId(Dictionary<string, object> txn)
